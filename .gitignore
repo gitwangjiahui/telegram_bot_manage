@@ -1,0 +1,37 @@
+# Composer
+/vendor/
+composer.lock
+
+# 日志文件
+/logs/
+*.log
+
+# 运行时文件
+/run/
+/logs
+*.pid
+
+# 数据文件
+/data/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# 调试文件
+debug.log
+
+# 环境配置
+.env
+.env.local
+
+# 验证码图片
+codes/
+*.png

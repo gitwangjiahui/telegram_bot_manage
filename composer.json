@@ -1,0 +1,7 @@
+{
+    "name": "myproject/telegram-bots",
+    "require": {
+        "php": "^8.0",
+        "php-telegram-bot/telegram-bot-manager": "^2.1"
+    }
+}
