@@ -28,7 +28,7 @@ date_default_timezone_set('Asia/Shanghai');
 
 require_once __DIR__ . '/vendor/autoload.php';
 
-// 自动加载 utils 和 model
+// 自动加载 utils、model 和 commands
 spl_autoload_register(function ($class) {
     // Utils
     $prefix = 'Utils\\';
@@ -43,6 +43,16 @@ spl_autoload_register(function ($class) {
     // Model
     $prefix = 'Model\\';
     $base_dir = __DIR__ . '/model/';
+    $len = strlen($prefix);
+    if (strncmp($prefix, $class, $len) === 0) {
+        $file = $base_dir . str_replace('\\', '/', substr($class, $len)) . '.php';
+        if (file_exists($file)) require $file;
+        return;
+    }
+    
+    // Commands
+    $prefix = 'Commands\\UserCommands\\';
+    $base_dir = __DIR__ . '/commands/UserCommands/';
     $len = strlen($prefix);
     if (strncmp($prefix, $class, $len) === 0) {
         $file = $base_dir . str_replace('\\', '/', substr($class, $len)) . '.php';
@@ -284,7 +294,12 @@ class BotManagerDaemon
                 'admin_ids' => $adminIds,
                 'bot_name' => $botName,
                 'bot_dir' => $this->dataDir . '/' . $botName,
-                'commands' => ['paths' => [$this->baseDir . '/commands']],
+                'commands' => ['paths' => [$this->baseDir . '/commands/UserCommands']],
+                'command_config' => [
+                    'genericmessage' => [
+                        'active' => true,
+                    ],
+                ],
                 'mysql' => $this->dbConfig['mysql'],
             ];
         } catch (PDOException $e) {
@@ -446,8 +461,10 @@ class BotManagerDaemon
         $stdOut = fopen($logFile, 'a');
         $stdErr = fopen($logFile, 'a');
 
-        // 测试 error_log
-        error_log("[MANAGER] daemonizeAndRun started");
+        // 设置当前 bot 名称（用于日志）
+        $this->setCurrentBot($botName);
+        
+        $this->log("=== Daemon started ===", $botName);
 
         // 设置全局配置
         $GLOBALS['bot_config'] = $config;
@@ -460,8 +477,12 @@ class BotManagerDaemon
 
         // 获取代理（复用 DbManager 连接）
         $pdo = Utils\DbManager::getConnection();
-        Utils\Config::init($pdo);
-        $proxy = Utils\Config::getProxy();
+        try {
+            Utils\Config::init($pdo);
+            $proxy = Utils\Config::getProxy();
+        } catch (\Exception $e) {
+            $proxy = null;
+        }
 
         // 初始化 HTTP 日志
         Utils\HttpLogger::init($this->baseDir, $botName);
@@ -496,6 +517,8 @@ class BotManagerDaemon
         });
 
         $botManager = null;
+        
+        $this->log("Entering main loop...", $botName);
 
         while ($running) {
             pcntl_signal_dispatch();
@@ -503,49 +526,94 @@ class BotManagerDaemon
             try {
                 // 只在第一次或异常后创建 BotManager
                 if ($botManager === null) {
-                    // 从配置中移除 mysql，防止 BotManager 自动创建连接
-                    // 我们使用外部 PDO 连接
-                    $botConfig = $config;
-                    unset($botConfig['mysql']);
-                    $botManager = new BotManager($botConfig);
-                    
-                    // 检查数据库连接
-                    $pdo = Utils\DbManager::getConnection();
+                    $this->log("Creating BotManager...", $botName);
                     try {
-                        $pdo->query('SELECT 1');
-                    } catch (\PDOException $e) {
-                        // 重新创建连接
-                        Utils\DbManager::resetConnection();
+                        // 从配置中移除 mysql，防止 BotManager 自动创建连接
+                        // 我们使用外部 PDO 连接
+                        $botConfig = $config;
+                        unset($botConfig['mysql']);
+                        $this->log("botConfig keys: " . implode(', ', array_keys($botConfig)), $botName);
+                        $this->log("api_key exists: " . (isset($botConfig['api_key']) ? 'yes' : 'no'), $botName);
+                        $this->log("bot_username: " . ($botConfig['bot_username'] ?? 'null'), $botName);
+                        $this->log("About to create BotManager...", $botName);
+                        $botManager = new BotManager($botConfig);
+                        $this->log("BotManager instance created", $botName);
+                        
+                        // 检查数据库连接
                         $pdo = Utils\DbManager::getConnection();
+                        try {
+                            $pdo->query('SELECT 1');
+                        } catch (\PDOException $e) {
+                            // 重新创建连接
+                            Utils\DbManager::resetConnection();
+                            $pdo = Utils\DbManager::getConnection();
+                        }
+                        
+                        $botManager->getTelegram()->enableExternalMySql($pdo);
+                        
+                        // 手动添加 commands 路径
+                        $commandsPath = $this->baseDir . '/commands/UserCommands';
+                        if (is_dir($commandsPath)) {
+                            $botManager->getTelegram()->addCommandsPaths([$commandsPath]);
+                            $this->log("Added commands path: {$commandsPath}", $botName);
+                        }
+                        
+                        $this->log("BotManager created successfully", $botName);
+                    } catch (\Exception $e) {
+                        $this->log("Error creating BotManager: " . $e->getMessage(), $botName);
+                        throw $e;
                     }
-                    
-                    $botManager->getTelegram()->enableExternalMySql($pdo);
                 }
 
                 
                 // 获取该 bot 的 ID 和 last_update_id
                 $botId = $this->getBotId($botName);
+                $this->log("botId = " . ($botId ?? 'null'), $botName);
                 $botLastUpdateId = $botId ? $this->getBotLastUpdateId($botId) : null;
+                $this->log("botLastUpdateId = " . ($botLastUpdateId ?? 'null'), $botName);
                 
                 $telegram = $botManager->getTelegram();
                 if ($botLastUpdateId && $botId) {
+                    $this->log("Using custom offset: " . ($botLastUpdateId + 1), $botName);
                     // 使用自定义 offset，禁用数据库查询
                     $telegram->useGetUpdatesWithoutDatabase(true);
-                    $response = $telegram->handleGetUpdates(['offset' => $botLastUpdateId + 1, 'timeout' => 30]);
+                    // 直接调用 Telegram API，不使用 handleGetUpdates
+                    $this->log("Calling Request::getUpdates with offset=" . ($botLastUpdateId + 1), $botName);
+                    $response = \Longman\TelegramBot\Request::getUpdates([
+                        'offset' => $botLastUpdateId + 1,
+                        'timeout' => 30,
+                    ]);
                     if ($response->isOk()) {
                         $updates = $response->getResult();
+                        $this->log("Got " . count($updates) . " updates", $botName);
                         if (count($updates) > 0) {
+                            $maxUpdateId = 0;
                             foreach ($updates as $update) {
-                                $telegram->processUpdate($update);
+                                $updateId = $update->getUpdateId();
+                                if ($updateId > $maxUpdateId) {
+                                    $maxUpdateId = $updateId;
+                                }
+                                $this->log("Processing update_id={$updateId}", $botName);
+                                try {
+                                    $telegram->processUpdate($update);
+                                    $this->log("Processed update_id={$updateId} successfully", $botName);
+                                } catch (\Exception $e) {
+                                    $this->log("Error processing update_id={$updateId}: " . $e->getMessage(), $botName);
+                                }
                             }
                             // 更新该 bot 的 last_update_id
-                            $newLastId = $telegram->getLastUpdateId();
+                            $newLastId = $maxUpdateId > 0 ? $maxUpdateId : $telegram->getLastUpdateId();
+                            $this->log("newLastId = " . ($newLastId ?? 'null'), $botName);
                             if ($newLastId) {
                                 $this->setBotLastUpdateId($botId, $newLastId);
+                                $this->log("Saved last_update_id = {$newLastId}", $botName);
                             }
                         }
+                    } else {
+                        $this->log("getUpdates failed: " . $response->getDescription(), $botName);
                     }
                 } else {
+                    $this->log("Using default run()", $botName);
                     // 第一次运行，使用默认方式
                     $botManager->run();
                     // 保存 last_update_id
@@ -562,12 +630,10 @@ class BotManagerDaemon
             } catch (Exception $e) {
                 $errors++;
                 $errorMsg = "[" . date('Y-m-d H:i:s') . "] Error: " . $e->getMessage();
-                echo $errorMsg . "\n";
                 $this->log($errorMsg, $botName);
                 $botManager = null; // 异常后重置，下次循环重新创建
                 if ($errors >= 10) {
                     $exitMsg = "[" . date('Y-m-d H:i:s') . "] Max errors reached, exiting";
-                    echo $exitMsg . "\n";
                     $this->log($exitMsg, $botName);
                     break;
                 }

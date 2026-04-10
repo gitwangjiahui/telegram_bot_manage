@@ -25,22 +25,29 @@ class GenericmessageCommand extends UserCommand
 
     public function __construct()
     {
-        $bot_name = $GLOBALS['bot_config']['bot_name'] ?? 'bot1';
-        
-        // 初始化 DbManager
-        DbManager::init($GLOBALS['bot_config']['mysql']);
-        
-        // 初始化模型
-        $this->verificationCode = new VerificationCode($bot_name);
-        $this->userVerification = new UserVerification($bot_name);
-        $this->forwardMap = new ForwardMap($bot_name);
-        
-        // 初始化 Config
-        $logFile = $GLOBALS['bot_config']['bot_dir'] . '/debug.log';
-        Config::init(DbManager::getConnection(), $logFile);
-        
-        $this->super_admin_id = $GLOBALS['bot_config']['super_admin_id'] ?? null;
-        $this->admin_ids = $GLOBALS['bot_config']['admin_ids'] ?? [];
+        try {
+            $bot_name = $GLOBALS['bot_config']['bot_name'] ?? 'bot1';
+            
+            // 初始化 DbManager
+            DbManager::init($GLOBALS['bot_config']['mysql']);
+            
+            // 初始化模型
+            $this->verificationCode = new VerificationCode($bot_name);
+            $this->userVerification = new UserVerification($bot_name);
+            $this->forwardMap = new ForwardMap($bot_name);
+            
+            // 初始化 Config
+            $logFile = $GLOBALS['bot_config']['bot_dir'] . '/debug.log';
+            Config::init(DbManager::getConnection(), $logFile);
+            
+            $this->super_admin_id = $GLOBALS['bot_config']['super_admin_id'] ?? null;
+            $this->admin_ids = $GLOBALS['bot_config']['admin_ids'] ?? [];
+            
+            $this->log("GenericmessageCommand constructed successfully");
+        } catch (\Exception $e) {
+            error_log("[GenericmessageCommand] Constructor error: " . $e->getMessage());
+            throw $e;
+        }
     }
 
     private function log($message): void
@@ -61,9 +68,19 @@ class GenericmessageCommand extends UserCommand
 
     public function execute(): ServerResponse
     {
+        $this->log("execute() called");
+        
         $message = $this->getMessage();
+        if (!$message) {
+            $this->log("ERROR: No message in execute()");
+            return Request::emptyResponse();
+        }
+        
         $user_id = $message->getFrom()->getId();
         $chat_id = $message->getChat()->getId();
+        $text = $message->getText() ?: '[no text]';
+        
+        $this->log("Message from user_id={$user_id}, chat_id={$chat_id}, text={$text}");
 
         // 管理员回复消息处理
         $is_admin = $this->isAdmin($user_id);
