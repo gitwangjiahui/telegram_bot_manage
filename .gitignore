@@ -35,3 +35,4 @@ debug.log
 # 验证码图片
 codes/
 *.png
+/config/global.php
