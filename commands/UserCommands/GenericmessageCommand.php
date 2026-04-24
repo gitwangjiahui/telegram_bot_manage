@@ -118,11 +118,13 @@ class GenericmessageCommand extends UserCommand
         if (!$is_admin) {
             $botId = $this->getBotId();
             $replyMessage = Config::getAutoReply($botId) ?? '消息已转发，请等待回复。';
-            
-            Request::sendMessage([
-                'chat_id' => $user_id,
-                'text' => $replyMessage,
-            ]);
+
+            if ($replyMessage) {
+                Request::sendMessage([
+                    'chat_id' => $user_id,
+                    'text' => $replyMessage,
+                ]);
+            }
         }
         
         return $result;
