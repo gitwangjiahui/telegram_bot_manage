@@ -142,15 +142,11 @@ class BotManagerDaemon
      */
     private function getBotId(string $botName): ?int
     {
-        try {
-            $pdo = Utils\DbManager::getConnection();
-            $stmt = $pdo->prepare("SELECT id FROM bots WHERE bot_name = ? AND is_active = 1");
-            $stmt->execute([$botName]);
-            $value = $stmt->fetchColumn();
-            return $value ? (int) $value : null;
-        } catch (\Exception $e) {
-            return null;
-        }
+        $pdo = Utils\DbManager::getConnection();
+        $stmt = $pdo->prepare("SELECT id FROM bots WHERE bot_name = ? AND is_active = 1");
+        $stmt->execute([$botName]);
+        $value = $stmt->fetchColumn();
+        return $value ? (int) $value : null;
     }
 
     /**
@@ -158,15 +154,11 @@ class BotManagerDaemon
      */
     private function getBotLastUpdateId(int $botId): ?int
     {
-        try {
-            $pdo = Utils\DbManager::getConnection();
-            $stmt = $pdo->prepare("SELECT config_value FROM config WHERE bot_id = ? AND config_key = 'last_update_id' ORDER BY id DESC LIMIT 1");
-            $stmt->execute([$botId]);
-            $value = $stmt->fetchColumn();
-            return $value ? (int) $value : null;
-        } catch (\Exception $e) {
-            return null;
-        }
+        $pdo = Utils\DbManager::getConnection();
+        $stmt = $pdo->prepare("SELECT config_value FROM config WHERE bot_id = ? AND config_key = 'last_update_id' ORDER BY id DESC LIMIT 1");
+        $stmt->execute([$botId]);
+        $value = $stmt->fetchColumn();
+        return $value ? (int) $value : null;
     }
 
     /**
@@ -251,6 +243,51 @@ class BotManagerDaemon
         }
         Utils\DbManager::init($this->dbConfig['mysql']);
         return Utils\DbManager::getConnection();
+    }
+
+    /**
+     * 确保数据库连接可用：做 SELECT 1 健康检查，失败则重置并重连一次。
+     * 返回可用 PDO；完全不可用时返回 null（不抛出）。
+     */
+    private function ensureDbConnection(string $botName, int $dbFails): ?\PDO
+    {
+        // 先探活现有连接
+        try {
+            $pdo = Utils\DbManager::getConnection();
+            $pdo->query('SELECT 1');
+            return $pdo;
+        } catch (\Throwable $e) {
+            // 落到下方重连
+        }
+
+        Utils\DbManager::resetConnection();
+
+        try {
+            return Utils\DbManager::getConnection();
+        } catch (\Throwable $e) {
+            // 降频记录日志，避免抖动期刷屏
+            if ($dbFails === 0 || $dbFails % 10 === 0) {
+                $this->log('数据库不可用，持续重试中: ' . $e->getMessage(), $botName);
+            }
+            return null;
+        }
+    }
+
+    /**
+     * 判断异常是否为数据库连接/查询类
+     */
+    private function isDbError(\Throwable $e): bool
+    {
+        if ($e instanceof \PDOException) {
+            return true;
+        }
+        $msg = $e->getMessage();
+        return str_contains($msg, 'SQLSTATE')
+            || str_contains($msg, 'gone away')
+            || str_contains($msg, 'Connection refused')
+            || str_contains($msg, "can't connect")
+            || str_contains($msg, 'Lost connection')
+            || str_contains($msg, '数据库配置未初始化');
     }
 
     /**
@@ -475,13 +512,15 @@ class BotManagerDaemon
         // 初始化 DbManager
         Utils\DbManager::init($config['mysql']);
 
-        // 获取代理（复用 DbManager 连接）
-        $pdo = Utils\DbManager::getConnection();
+        // 启动阶段数据库不可用不能让守护进程退出，主循环会持续重试
+        $pdo = null;
+        $proxy = null;
         try {
+            $pdo = Utils\DbManager::getConnection();
             Utils\Config::init($pdo);
             $proxy = Utils\Config::getProxy();
-        } catch (\Exception $e) {
-            $proxy = null;
+        } catch (\Throwable $e) {
+            $this->log('启动时数据库不可用，进入主循环持续重试: ' . $e->getMessage(), $botName);
         }
 
         // 初始化 HTTP 日志
@@ -506,7 +545,8 @@ class BotManagerDaemon
         \Longman\TelegramBot\Request::setClient($guzzleClient);
 
         // 主循环
-        $errors = 0;
+        $errors = 0;      // 非数据库类连续异常
+        $dbFails = 0;     // 数据库类连续异常（无限重试，不退出）
         $running = true;
 
         pcntl_signal(SIGTERM, function () use (&$running) {
@@ -521,36 +561,40 @@ class BotManagerDaemon
         while ($running) {
             pcntl_signal_dispatch();
 
+            // ===== 数据库健康检查：不可用时无限重试，绝不让守护进程退出 =====
+            $pdo = $this->ensureDbConnection($botName, $dbFails);
+            if ($pdo === null) {
+                // 等待恢复（等待期间响应停止信号）
+                $wait = (int) min($dbFails * 2, 30);
+                for ($i = 0; $i < $wait && $running; $i++) {
+                    sleep(1);
+                    pcntl_signal_dispatch();
+                }
+                continue;
+            }
+            if ($dbFails > 0) {
+                $this->log("数据库连接已恢复", $botName);
+                $dbFails = 0;
+                $errors = 0;
+                $botManager = null; // 用新连接重建
+            }
+
             try {
-                // 只在第一次或异常后创建 BotManager
+                // 只在第一次、DB 恢复或异常后创建 BotManager
                 if ($botManager === null) {
-                    try {
-                        $botConfig = $config;
-                        unset($botConfig['mysql']);
-                        $botManager = new BotManager($botConfig);
-                        
-                        // 检查数据库连接
-                        $pdo = Utils\DbManager::getConnection();
-                        try {
-                            $pdo->query('SELECT 1');
-                        } catch (\PDOException $e) {
-                            Utils\DbManager::resetConnection();
-                            $pdo = Utils\DbManager::getConnection();
-                        }
-                        
-                        $botManager->getTelegram()->enableExternalMySql($pdo);
-                        
-                        // 手动添加 commands 路径
-                        $commandsPath = $this->baseDir . '/commands/UserCommands';
-                        if (is_dir($commandsPath)) {
-                            $botManager->getTelegram()->addCommandsPaths([$commandsPath]);
-                        }
-                        
-                        $this->log("BotManager created successfully", $botName);
-                    } catch (\Exception $e) {
-                        $this->log("Error creating BotManager: " . $e->getMessage(), $botName);
-                        throw $e;
+                    $botConfig = $config;
+                    unset($botConfig['mysql']);
+                    $botManager = new BotManager($botConfig);
+
+                    $botManager->getTelegram()->enableExternalMySql($pdo);
+
+                    // 手动添加 commands 路径
+                    $commandsPath = $this->baseDir . '/commands/UserCommands';
+                    if (is_dir($commandsPath)) {
+                        $botManager->getTelegram()->addCommandsPaths([$commandsPath]);
                     }
+
+                    $this->log("BotManager created successfully", $botName);
                 }
 
                 
@@ -576,7 +620,7 @@ class BotManagerDaemon
                                 }
                                 try {
                                     $telegram->processUpdate($update);
-                                } catch (\Exception $e) {
+                                } catch (\Throwable $e) {
                                     $this->log("Error processing update_id={$updateId}: " . $e->getMessage(), $botName);
                                 }
                             }
@@ -587,21 +631,34 @@ class BotManagerDaemon
                             }
                         }
                     }
-                } else {
-                    // 第一次运行，使用默认方式
+                } elseif ($botId) {
+                    // 已登记但还没有 last_update_id（首次运行），使用默认方式
                     $botManager->run();
                     // 保存 last_update_id
                     $newLastId = $telegram->getLastUpdateId();
-                    if ($newLastId && $botId) {
+                    if ($newLastId) {
                         $this->setBotLastUpdateId($botId, $newLastId);
                     }
+                } else {
+                    // 配置存在但 bots 表查不到（运行中被停用/删除），不按首次运行处理
+                    $this->log("Bot 在数据库中不存在或已停用，5 秒后重试", $botName);
+                    sleep(5);
                 }
                 
                 $errors = 0;
                 
                 // 如果没有新消息，稍微等待一下避免频繁请求
                 sleep(1);
-            } catch (Exception $e) {
+            } catch (\Throwable $e) {
+                // 数据库类异常：无限等待恢复，绝不退出
+                if ($this->isDbError($e)) {
+                    $dbFails++;
+                    $this->log("数据库异常，等待恢复 ({$dbFails}): " . $e->getMessage(), $botName);
+                    Utils\DbManager::resetConnection();
+                    $botManager = null;
+                    continue;
+                }
+
                 $errors++;
                 $this->log("Error: " . $e->getMessage(), $botName);
                 $botManager = null; // 异常后重置，下次循环重新创建
