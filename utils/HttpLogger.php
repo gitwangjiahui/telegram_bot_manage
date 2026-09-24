@@ -210,6 +210,17 @@ class HttpLogger
         $logContent = implode(PHP_EOL, $logLines) . PHP_EOL;
         file_put_contents(self::$currentLogFile, $logContent, FILE_APPEND | LOCK_EX);
 
+        // 同时向统一日志通道输出一行摘要
+        $path = preg_replace('#^https?://[^/]+#', '', $url);
+        $summary = sprintf(
+            'HTTP %s %s %s %sms',
+            $httpCode !== null ? $httpCode : '---',
+            $method,
+            $path,
+            round($duration * 1000)
+        );
+        BotLog::write($summary, $botName, 'HTTP');
+
         // 同时写入主日志文件（简要信息）
         self::logToMainFile($method, $url, $options, $response, $duration, $httpCode);
     }

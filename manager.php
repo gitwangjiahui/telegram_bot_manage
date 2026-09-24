@@ -89,6 +89,9 @@ class BotManagerDaemon
             }
         }
 
+        // 初始化统一日志通道（logs/bots.log，跨天归档到 logs/bots/）
+        Utils\BotLog::init($this->baseDir);
+
         // 加载数据库配置
         $this->dbConfig = require $this->baseDir . '/config/database.php';
     }
@@ -102,14 +105,12 @@ class BotManagerDaemon
     }
 
     /**
-     * 写入日志到对应 Bot 的日志文件
+     * 写入日志到统一通道（行内标注 bot 名）
      */
     private function log(string $message, ?string $botName = null): void
     {
         $targetBot = $botName ?? $this->currentBotName ?? 'manager';
-        $logFile = $this->logsDir . '/' . $targetBot . '.log';
-        $line = '[' . date('Y-m-d H:i:s') . '] [MANAGER] ' . $message . PHP_EOL;
-        file_put_contents($logFile, $line, FILE_APPEND | LOCK_EX);
+        Utils\BotLog::write($message, $targetBot, 'MANAGER');
     }
 
     /**
@@ -127,14 +128,6 @@ class BotManagerDaemon
     private function getPidFile(string $botName): string
     {
         return $this->runDir . '/' . $botName . '.pid';
-    }
-
-    /**
-     * 获取日志文件路径
-     */
-    private function getLogFile(string $botName): string
-    {
-        return $this->logsDir . '/' . $botName . '.log';
     }
 
     /**
@@ -487,7 +480,9 @@ class BotManagerDaemon
         $daemonPid = posix_getpid();
         $this->writePid($botName, $daemonPid);
 
-        $logFile = $this->getLogFile($botName);
+        // 守护进程的原始输出也并入统一通道
+        $logFile = $this->logsDir . '/bots.log';
+        Utils\BotLog::init($this->baseDir, $botName);
 
         // 重定向标准输出/错误到日志文件
         fclose(STDIN);
@@ -839,21 +834,23 @@ class BotManagerDaemon
     }
 
     /**
-     * 查看日志
+     * 查看日志（从统一通道过滤该 Bot 的行）
      */
     public function logs(string $botName, int $lines = 50): int
     {
-        $logFile = $this->getLogFile($botName);
+        $logFile = $this->logsDir . '/bots.log';
 
         if (!file_exists($logFile)) {
-            echo "Bot '{$botName}' 没有日志文件\n";
+            echo "没有日志文件\n";
             return 1;
         }
 
-        echo "Bot '{$botName}' 最近 {$lines} 行日志:\n";
+        echo "最近 {$lines} 行 [{$botName}] 日志:\n";
         echo str_repeat('=', 50) . "\n";
 
-        system("tail -n {$lines} " . escapeshellarg($logFile));
+        $pattern = '/\[' . preg_quote($botName, '/') . '\]/';
+        system('grep ' . escapeshellarg($pattern) . ' ' . escapeshellarg($logFile)
+            . ' | tail -n ' . (int)$lines);
 
         return 0;
     }

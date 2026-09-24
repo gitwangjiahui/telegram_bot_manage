@@ -52,8 +52,8 @@ class GenericmessageCommand extends UserCommand
 
     private function log($message): void
     {
-        $log_file = $GLOBALS['bot_config']['bot_dir'] . '/debug.log';
-        file_put_contents($log_file, date('Y-m-d H:i:s') . ' - ' . $message . PHP_EOL, FILE_APPEND | LOCK_EX);
+        $bot_name = $GLOBALS['bot_config']['bot_name'] ?? 'bot1';
+        \Utils\BotLog::write($message, $bot_name, 'DEBUG');
     }
 
     private function isAdmin($user_id): bool
