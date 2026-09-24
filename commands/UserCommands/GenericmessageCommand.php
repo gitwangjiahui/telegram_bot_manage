@@ -111,10 +111,7 @@ class GenericmessageCommand extends UserCommand
             }
         }
 
-        // 转发消息给所有管理员
-        $result = $this->forwardToAllAdmins($message, $user_id, $chat_id);
-        
-        // 用户发送消息后，提示消息已转发
+        // 先即时回复用户，再转发给管理员，避免用户等待转发的网络耗时
         if (!$is_admin) {
             $botId = $this->getBotId();
             $replyMessage = Config::getAutoReply($botId) ?? '消息已转发，请等待回复。';
@@ -126,8 +123,9 @@ class GenericmessageCommand extends UserCommand
                 ]);
             }
         }
-        
-        return $result;
+
+        // 转发消息给所有管理员
+        return $this->forwardToAllAdmins($message, $user_id, $chat_id);
     }
 
     private function getBotId(): int

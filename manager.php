@@ -598,6 +598,7 @@ class BotManagerDaemon
                 $botLastUpdateId = $botId ? $this->getBotLastUpdateId($botId) : null;
                 
                 $telegram = $botManager->getTelegram();
+                $hadUpdates = false;
                 if ($botLastUpdateId && $botId) {
                     $telegram->useGetUpdatesWithoutDatabase(true);
                     $response = \Longman\TelegramBot\Request::getUpdates([
@@ -607,6 +608,7 @@ class BotManagerDaemon
                     if ($response->isOk()) {
                         $updates = $response->getResult();
                         if (count($updates) > 0) {
+                            $hadUpdates = true;
                             $maxUpdateId = 0;
                             foreach ($updates as $update) {
                                 $updateId = $update->getUpdateId();
@@ -639,11 +641,13 @@ class BotManagerDaemon
                     $this->log("Bot 在数据库中不存在或已停用，5 秒后重试", $botName);
                     sleep(5);
                 }
-                
+
                 $errors = 0;
-                
-                // 如果没有新消息，稍微等待一下避免频繁请求
-                sleep(1);
+
+                // 仅空轮询时稍作等待；处理过消息立即进入下一次拉取，避免额外 1s 延迟
+                if (!$hadUpdates) {
+                    sleep(1);
+                }
             } catch (\Throwable $e) {
                 // 数据库类异常：无限等待恢复，绝不退出
                 if ($this->isDbError($e)) {
