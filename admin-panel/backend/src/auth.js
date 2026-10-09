@@ -1,5 +1,5 @@
 import jwt from 'jsonwebtoken';
-import { config } from '../config.js';
+import { config } from './config.js';
 import { query, one } from './db.js';
 
 // 加载用户角色、权限、Bot 范围
