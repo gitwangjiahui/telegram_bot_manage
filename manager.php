@@ -267,6 +267,30 @@ class BotManagerDaemon
     }
 
     /**
+     * 判断异常是否为 Telegram 网络层故障（请求未到达 Telegram，无响应）
+     * 如 cURL error 35/28/7/56、连接重置、超时等。
+     */
+    private function isNetworkError(\Throwable $e): bool
+    {
+        $msg = $e->getMessage();
+
+        if (str_contains($msg, 'cURL error')) {
+            // 提取 cURL 错误码
+            if (preg_match('/cURL error (\d+)/', $msg, $m)) {
+                $code = (int) $m[1];
+                // 6=无法解析主机, 7=无法连接, 28=超时, 35=SSL握手失败, 52/56=连接重置, 18=部分传输
+                return in_array($code, [6, 7, 18, 28, 35, 52, 56], true);
+            }
+            return true;
+        }
+
+        return str_contains($msg, 'Connection reset')
+            || str_contains($msg, 'Connection timed out')
+            || str_contains($msg, 'Encountered end of file')
+            || str_contains($msg, 'Failed to connect');
+    }
+
+    /**
      * 判断异常是否为数据库连接/查询类
      */
     private function isDbError(\Throwable $e): bool
@@ -540,8 +564,9 @@ class BotManagerDaemon
         \Longman\TelegramBot\Request::setClient($guzzleClient);
 
         // 主循环
-        $errors = 0;      // 非数据库类连续异常
+        $errors = 0;      // 非数据库类连续业务异常（收到 Telegram 响应的真错误，如 401/409）
         $dbFails = 0;     // 数据库类连续异常（无限重试，不退出）
+        $netFails = 0;    // Telegram 网络类连续异常（连不上/超时，无限重试，不退出）
         $running = true;
 
         pcntl_signal(SIGTERM, function () use (&$running) {
@@ -643,6 +668,7 @@ class BotManagerDaemon
                 }
 
                 $errors = 0;
+                $netFails = 0;
 
                 // 仅空轮询时稍作等待；处理过消息立即进入下一次拉取，避免额外 1s 延迟
                 if (!$hadUpdates) {
@@ -658,7 +684,20 @@ class BotManagerDaemon
                     continue;
                 }
 
+                // Telegram 网络类异常（请求未到达 Telegram）：无限重试，绝不退出
+                if ($this->isNetworkError($e)) {
+                    $netFails++;
+                    if ($netFails === 1 || $netFails % 10 === 0) {
+                        $this->log("Telegram 网络异常，持续重试中 ({$netFails}): " . $e->getMessage(), $botName);
+                    }
+                    $botManager = null; // 网络恢复后重建
+                    sleep((int) min($netFails * 2, 30));
+                    continue;
+                }
+
+                // 其余为收到响应的真正业务错误（401 token 无效 / 409 冲突等），计入熔断
                 $errors++;
+                $netFails = 0;
                 $this->log("Error: " . $e->getMessage(), $botName);
                 $botManager = null; // 异常后重置，下次循环重新创建
                 if ($errors >= 10) {
