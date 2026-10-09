@@ -20,9 +20,10 @@ use Model\CaptchaPool;
  */
 class CaptchaPoolWorker
 {
-    private const BATCH        = 8;     // 每批并发上传数
-    private const LOOP_SLEEP   = 10;    // 余量检查周期（秒）
-    private const DEFAULT_NUM  = 100;   // 默认池容量
+    private const BATCH_CHANNEL = 8;   // 每批并发数（存储频道，容量大）
+    private const BATCH_CHAT    = 3;   // 每批并发数（超管个人聊天，避免触发单聊天限速）
+    private const LOOP_SLEEP   = 10;  // 余量检查周期（秒）
+    private const DEFAULT_NUM  = 100; // 默认池容量
 
     private string $botName;
     private array $mysql;
@@ -116,9 +117,11 @@ class CaptchaPoolWorker
     private function refill(CaptchaPool $pool, int $need): int
     {
         $made = 0;
+        // 超管个人聊天限速更严，用较小批量
+        $batchSize = $this->deleteAfter ? self::BATCH_CHAT : self::BATCH_CHANNEL;
 
         while ($need > 0 && $this->running) {
-            $size = min(self::BATCH, $need);
+            $size = min($batchSize, $need);
 
             // 生成本批题目与图片
             $batch = [];
@@ -129,17 +132,28 @@ class CaptchaPoolWorker
             }
 
             // 并发上传
-            $uploaded = $this->uploadBatch($batch);
+            $result = $this->uploadBatch($batch);
 
             // 落库
-            if (!empty($uploaded)) {
-                $pool->insertMany($uploaded);
-                $made += count($uploaded);
+            if (!empty($result['items'])) {
+                $pool->insertMany($result['items']);
+                $made += count($result['items']);
             }
 
             // 清理临时图片
             foreach ($batch as $b) {
                 @unlink($b['file']);
+            }
+
+            // 触发单聊天限速：按 retry_after 退避（本批失败项需重试，need 不递减）
+            if ($result['retry_after'] !== null) {
+                $wait = (int) $result['retry_after'];
+                BotLog::write("触发限速，等待 {$wait}s", $this->botName, 'POOL');
+                for ($i = 0; $i < $wait && $this->running; $i++) {
+                    sleep(1);
+                    pcntl_signal_dispatch();
+                }
+                continue;
             }
 
             $need -= $size;
@@ -149,10 +163,10 @@ class CaptchaPoolWorker
     }
 
     /**
-     * curl_multi 并发上传一批，返回成功项
+     * curl_multi 并发上传一批
      *
      * @param array $batch
-     * @return array<int, array{file_id:string, code:string, answer:string}>
+     * @return array{items:array<int, array{file_id:string,code:string,answer:string}>, retry_after:?int}
      */
     private function uploadBatch(array $batch): array
     {
@@ -189,6 +203,7 @@ class CaptchaPoolWorker
         // 收集结果
         $ok = [];
         $toDelete = [];
+        $retryAfter = null;
         foreach ($handles as $idx => $ch) {
             $resp = curl_multi_getcontent($ch);
             $data = json_decode($resp, true);
@@ -203,6 +218,8 @@ class CaptchaPoolWorker
                     ];
                     $toDelete[] = $data['result']['message_id'];
                 }
+            } elseif (($data['error_code'] ?? 0) === 429) {
+                $retryAfter = (int) ($data['parameters']['retry_after'] ?? 1);
             }
             curl_multi_remove_handle($mh, $ch);
             curl_close($ch);
@@ -214,7 +231,7 @@ class CaptchaPoolWorker
             $this->deleteMessages($toDelete);
         }
 
-        return array_values($ok);
+        return ['items' => array_values($ok), 'retry_after' => $retryAfter];
     }
 
     /**
