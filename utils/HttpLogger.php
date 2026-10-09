@@ -3,37 +3,22 @@
 namespace Utils;
 
 /**
- * HTTP 请求日志记录器
- * 支持按日期切割日志文件
+ * HTTP 请求日志
+ * 所有 Bot 的 HTTP 请求/响应详细内容统一写入 http 通道（logs/http.log），
+ * 跨天与 bots 通道一样归档到 logs/bot/http-YYYY-MM-DD.NN.log。
+ * 失败请求额外在 bots 通道输出一行摘要。
  */
 class HttpLogger
 {
     private static ?string $botName = null;
-    private static string $baseLogDir;
-    private static string $currentDate = '';
-    private static ?string $currentLogFile = null;
 
     /**
-     * 初始化日志目录
+     * 初始化（统一通道由 BotLog::init 建立）
      */
     public static function init(string $baseDir, ?string $botName = null): void
     {
-        self::$baseLogDir = $baseDir . '/logs';
         self::$botName = $botName;
-        self::$currentDate = date('Y-m-d');
-
-        // 确保日志目录存在
-        if (!is_dir(self::$baseLogDir)) {
-            mkdir(self::$baseLogDir, 0755, true);
-        }
-
-        // 确保 http 子目录存在
-        $httpDir = self::$baseLogDir . '/http';
-        if (!is_dir($httpDir)) {
-            mkdir($httpDir, 0755, true);
-        }
-
-        self::updateLogFile();
+        BotLog::init($baseDir, $botName ?? 'manager');
     }
 
     /**
@@ -42,44 +27,17 @@ class HttpLogger
     public static function setBotName(string $botName): void
     {
         self::$botName = $botName;
-        self::updateLogFile();
     }
 
     /**
-     * 更新当前日志文件路径（按日期切割）
-     */
-    private static function updateLogFile(): void
-    {
-        $botName = self::$botName ?? 'unknown';
-        self::$currentLogFile = sprintf(
-            '%s/http/http_%s-%s.log',
-            self::$baseLogDir,
-            $botName,
-            self::$currentDate
-        );
-    }
-
-    /**
-     * 检查是否需要切换日志文件（日期变化）
-     */
-    private static function checkRotation(): void
-    {
-        $today = date('Y-m-d');
-        if ($today !== self::$currentDate) {
-            self::$currentDate = $today;
-            self::updateLogFile();
-        }
-    }
-
-    /**
-     * 记录 HTTP 请求和响应
+     * 记录 HTTP 请求和响应到 http 通道；失败时同时向 bots 通道输出摘要
      *
-     * @param string $method HTTP 方法
-     * @param string $url 请求 URL
-     * @param array $options 请求选项
-     * @param mixed $response 响应内容
-     * @param float $duration 请求耗时（秒）
-     * @param int|null $httpCode HTTP 状态码
+     * @param string      $method   HTTP 方法
+     * @param string      $url      请求 URL
+     * @param array       $options  请求选项
+     * @param mixed       $response 响应内容
+     * @param float       $duration 请求耗时（秒）
+     * @param int|null    $httpCode HTTP 状态码
      */
     public static function log(
         string $method,
@@ -89,26 +47,16 @@ class HttpLogger
         float $duration = 0,
         ?int $httpCode = null
     ): void {
-        if (self::$currentLogFile === null) {
-            return;
-        }
-
-        self::checkRotation();
-
-        $timestamp = date('Y-m-d H:i:s.u');
         $botName = self::$botName ?? 'unknown';
 
-        // 构建日志内容
+        // ===== 组装详细日志块 =====
         $logLines = [
-            str_repeat('=', 80),
-            "[{$timestamp}] [{$botName}] HTTP Request",
-            str_repeat('-', 40),
             "Method: {$method}",
             "URL: {$url}",
             "Duration: " . round($duration * 1000, 2) . " ms",
         ];
 
-        // 记录请求头
+        // 请求头
         if (!empty($options['headers'])) {
             $logLines[] = "Request Headers:";
             foreach ($options['headers'] as $key => $value) {
@@ -123,7 +71,7 @@ class HttpLogger
             }
         }
 
-        // 记录请求参数
+        // 请求参数
         if (!empty($options['form_params'])) {
             $logLines[] = "Request Parameters:";
             foreach ($options['form_params'] as $key => $value) {
@@ -131,19 +79,16 @@ class HttpLogger
             }
         } elseif (!empty($options['json'])) {
             $logLines[] = "Request Body (JSON):";
-            $body = json_encode($options['json'], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
-            $logLines[] = self::indent($body);
+            $logLines[] = self::indent(json_encode($options['json'], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
         } elseif (!empty($options['body'])) {
             $logLines[] = "Request Body:";
             $body = (string) $options['body'];
-            // 尝试解析为 form data
             parse_str($body, $formData);
             if (!empty($formData)) {
                 foreach ($formData as $key => $value) {
                     $logLines[] = "  {$key} = {$value}";
                 }
             } else {
-                // 尝试格式化 JSON
                 $decoded = json_decode($body, true);
                 if ($decoded !== null) {
                     $body = json_encode($decoded, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
@@ -151,8 +96,8 @@ class HttpLogger
                 $logLines[] = self::indent($body);
             }
         }
-        
-        // 记录查询参数
+
+        // 查询参数
         if (!empty($options['query_params'])) {
             $logLines[] = "Query Parameters:";
             foreach ($options['query_params'] as $key => $value) {
@@ -160,12 +105,10 @@ class HttpLogger
             }
         }
 
-        // 记录响应
-        $logLines[] = str_repeat('-', 40);
+        // 响应
         $logLines[] = "Response:";
         if ($httpCode !== null) {
-            $statusText = self::getHttpStatusText($httpCode);
-            $logLines[] = "Status: {$httpCode} {$statusText}";
+            $logLines[] = "Status: {$httpCode} " . self::getHttpStatusText($httpCode);
         }
 
         if ($response !== null) {
@@ -175,42 +118,18 @@ class HttpLogger
             } elseif (is_array($response) || is_object($response)) {
                 $decoded = (array) $response;
             }
-            
+
             if ($decoded !== null) {
-                // 提取并显示关键响应参数
-                if (isset($decoded['ok'])) {
-                    $logLines[] = "  ok = " . ($decoded['ok'] ? 'true' : 'false');
-                }
-                if (isset($decoded['result']) && is_array($decoded['result'])) {
-                    $count = count($decoded['result']);
-                    $logLines[] = "  result_count = {$count}";
-                    if ($count > 0) {
-                        $updateIds = array_map(fn($item) => $item['update_id'] ?? 'N/A', $decoded['result']);
-                        $logLines[] = "  update_ids = [" . implode(', ', $updateIds) . "]";
-                    }
-                }
-                if (isset($decoded['description'])) {
-                    $logLines[] = "  description = {$decoded['description']}";
-                }
-                if (isset($decoded['error_code'])) {
-                    $logLines[] = "  error_code = {$decoded['error_code']}";
-                }
-                // 完整响应体
-                $logLines[] = "  Full Response:";
-                $logLines[] = self::indent(json_encode($decoded, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE), 4);
+                $logLines[] = self::indent(json_encode($decoded, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
             } else {
                 $logLines[] = self::indent(var_export($response, true));
             }
         }
 
-        $logLines[] = str_repeat('=', 80);
-        $logLines[] = ''; // 空行分隔
+        // 详细内容写入 http 通道（多行自动缩进）
+        BotLog::writeTo('http', implode(PHP_EOL, $logLines), $botName, 'HTTP');
 
-        // 写入日志
-        $logContent = implode(PHP_EOL, $logLines) . PHP_EOL;
-        file_put_contents(self::$currentLogFile, $logContent, FILE_APPEND | LOCK_EX);
-
-        // 失败请求才向统一日志通道输出摘要（成功的长轮询等不打，避免噪音）
+        // 失败请求额外向 bots 通道输出一行摘要
         if ($httpCode === null || $httpCode >= 400) {
             $path = preg_replace('#^https?://[^/]+#', '', $url);
             $summary = sprintf(
@@ -222,62 +141,6 @@ class HttpLogger
             );
             BotLog::write($summary, $botName, 'HTTP');
         }
-
-        // 同时写入主日志文件（简要信息）
-        self::logToMainFile($method, $url, $options, $response, $duration, $httpCode);
-    }
-
-    /**
-     * 记录简要信息到主日志文件
-     */
-    private static function logToMainFile(
-        string $method,
-        string $url,
-        array $options,
-        mixed $response,
-        float $duration,
-        ?int $httpCode
-    ): void {
-        $botName = self::$botName ?? 'unknown';
-        $mainLogFile = self::$baseLogDir . '/http_' . $botName . '.log';
-
-        $timestamp = date('Y-m-d H:i:s');
-        $status = $httpCode !== null ? "[{$httpCode}]" : '[?]';
-        $ms = round($duration * 1000, 2);
-
-        // 提取关键请求参数
-        $params = [];
-        if (!empty($options['form_params'])) {
-            foreach ($options['form_params'] as $key => $value) {
-                $params[] = "{$key}={$value}";
-            }
-        } elseif (!empty($options['json'])) {
-            foreach ($options['json'] as $key => $value) {
-                $params[] = "{$key}={$value}";
-            }
-        }
-        $paramsStr = !empty($params) ? ' | ' . implode(', ', $params) : '';
-
-        // 提取关键响应信息
-        $respInfo = '';
-        $decoded = null;
-        if (is_string($response)) {
-            $decoded = json_decode($response, true);
-        } elseif (is_array($response) || is_object($response)) {
-            $decoded = (array) $response;
-        }
-        if ($decoded !== null) {
-            if (isset($decoded['ok'])) {
-                $respInfo .= ' ok=' . ($decoded['ok'] ? 'true' : 'false');
-            }
-            if (isset($decoded['result']) && is_array($decoded['result'])) {
-                $count = count($decoded['result']);
-                $respInfo .= ' results=' . $count;
-            }
-        }
-
-        $line = "[{$timestamp}] {$status} {$method} {$url}{$paramsStr}{$respInfo} ({$ms}ms)" . PHP_EOL;
-        file_put_contents($mainLogFile, $line, FILE_APPEND | LOCK_EX);
     }
 
     /**
@@ -287,8 +150,7 @@ class HttpLogger
     {
         $indent = str_repeat(' ', $spaces);
         $lines = explode("\n", $text);
-        $indented = array_map(fn($line) => $indent . $line, $lines);
-        return implode("\n", $indented);
+        return implode("\n", array_map(fn($line) => $indent . $line, $lines));
     }
 
     /**

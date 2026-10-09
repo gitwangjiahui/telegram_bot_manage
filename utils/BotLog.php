@@ -3,94 +3,135 @@
 namespace Utils;
 
 /**
- * 统一 Bot 日志通道
- * - 所有 Bot 的运行日志统一写入 logs/bots.log，行首标注 bot 名称
- * - 跨天时自动归档为 logs/bots/bots-YYYY-MM-DD.NN.log（多进程并发安全）
+ * 统一 Bot 日志通道（支持多通道）
+ *
+ * 通道：
+ *   bots → logs/bots.log  运行日志（所有 Bot 合并，行首标注 bot 名）
+ *   http → logs/http.log  HTTP 详细日志（所有 Bot 合并）
+ *
+ * 跨天时自动归档到 logs/bot/<channel>-YYYY-MM-DD.NN.log
+ * 多进程并发安全（copytruncate，持锁复制后清空，inode 不变）
  */
 class BotLog
 {
-    private static ?string $logFile = null;
-    private static ?string $archiveDir = null;
-    private static string $today = '';
-    private static string $defaultBot = 'manager';
+    private static ?string $baseDir = null;
+
+    /** @var array<string, array{file:string, today:string, archiveDir:string}> */
+    private static array $channels = [];
 
     /**
-     * 初始化统一日志通道
+     * 初始化日志目录与默认通道
      */
     public static function init(string $baseDir, string $defaultBot = 'manager'): void
     {
-        self::$logFile = $baseDir . '/logs/bots.log';
-        self::$archiveDir = $baseDir . '/logs/bots';
-        self::$defaultBot = $defaultBot;
-        self::$today = date('Y-m-d');
+        self::$baseDir = $baseDir;
 
-        if (!is_dir(dirname(self::$logFile))) {
-            mkdir(dirname(self::$logFile), 0755, true);
+        if (!is_dir($baseDir . '/logs')) {
+            mkdir($baseDir . '/logs', 0755, true);
         }
-        if (!is_dir(self::$archiveDir)) {
-            mkdir(self::$archiveDir, 0755, true);
-        }
-        if (!file_exists(self::$logFile)) {
-            touch(self::$logFile);
-        }
+
+        self::ensureChannel('bots');
     }
 
     /**
-     * 写入一行日志
-     *
-     * @param string      $message 日志内容
-     * @param string|null $bot     bot 名称（缺省用默认值）
-     * @param string      $tag     可选标签，如 MANAGER / HTTP
+     * 写入 bots 通道
      */
     public static function write(string $message, ?string $bot = null, string $tag = ''): void
     {
-        if (self::$logFile === null) {
+        self::writeTo('bots', $message, $bot, $tag);
+    }
+
+    /**
+     * 写入指定通道
+     */
+    public static function writeTo(string $channel, string $message, ?string $bot = null, string $tag = ''): void
+    {
+        if (self::$baseDir === null) {
             return;
         }
 
-        self::rotate();
+        $state = &self::ensureChannel($channel);
+        self::rotate($state, $channel);
 
-        $bot = $bot ?? self::$defaultBot;
+        $bot = $bot ?? 'manager';
         $tagStr = $tag !== '' ? "[{$tag}] " : '';
         $line = '[' . date('Y-m-d H:i:s') . "] [{$bot}] {$tagStr}" . $message;
 
         // 多行内容续行缩进，保持通道行格式整齐
         $line = str_replace(PHP_EOL, PHP_EOL . '    ', $line);
 
-        file_put_contents(self::$logFile, $line . PHP_EOL, FILE_APPEND | LOCK_EX);
+        file_put_contents($state['file'], $line . PHP_EOL, FILE_APPEND | LOCK_EX);
     }
 
     /**
-     * 跨天归档：把 bots.log 内容复制到 bots/bots-YYYY-MM-DD.NN.log 后清空。
-     * 用 copytruncate 而非 rename，保证守护进程持有的文件句柄仍指向同一 inode。
-     * 全程持排他锁，多进程并发安全。归档日期取被归档文件的 mtime。
+     * 各通道对应的归档子目录
      */
-    private static function rotate(): void
+    private const ARCHIVE_SUBDIR = [
+        'bots' => 'bot',
+        'http' => 'http',
+    ];
+
+    /**
+     * 获取（必要时创建）通道状态
+     *
+     * @return array{file:string, today:string, archiveDir:string}
+     */
+    private static function &ensureChannel(string $channel): array
+    {
+        if (!isset(self::$channels[$channel])) {
+            $file = self::$baseDir . "/logs/{$channel}.log";
+            if (!file_exists($file)) {
+                touch($file);
+            }
+
+            $subdir = self::ARCHIVE_SUBDIR[$channel] ?? $channel;
+            $archiveDir = self::$baseDir . "/logs/{$subdir}";
+            if (!is_dir($archiveDir)) {
+                mkdir($archiveDir, 0755, true);
+            }
+
+            self::$channels[$channel] = [
+                'file' => $file,
+                'today' => date('Y-m-d'),
+                'archiveDir' => $archiveDir,
+            ];
+        }
+
+        return self::$channels[$channel];
+    }
+
+    /**
+     * 跨天归档：把当前通道文件内容复制到
+     * logs/bot/<channel>-YYYY-MM-DD.NN.log 后清空。
+     *
+     * @param array{file:string, today:string} $state
+     */
+    private static function rotate(array &$state, string $channel): void
     {
         $today = date('Y-m-d');
-        if ($today === self::$today) {
+        if ($today === $state['today']) {
             return;
         }
 
-        $lock = fopen(self::$logFile, 'c+');
+        $lock = fopen($state['file'], 'c+');
         if ($lock === false) {
-            self::$today = $today;
+            $state['today'] = $today;
             return;
         }
         flock($lock, LOCK_EX);
 
         try {
-            clearstatcache(true, self::$logFile);
+            clearstatcache(true, $state['file']);
 
             if (fseek($lock, 0, SEEK_END) === 0 && ftell($lock) > 0) {
-                // 内容属于归档前的活动日期（进程自身记录），不取 mtime
-                $logDate = self::$today;
+                // 内容属于归档前的活动日期（进程自身记录）
+                $logDate = $state['today'];
 
                 fseek($lock, 0);
                 $contents = stream_get_contents($lock);
 
                 for ($seq = 1; $seq <= 99; $seq++) {
-                    $target = sprintf('%s/bots-%s.%02d.log', self::$archiveDir, $logDate, $seq);
+                    $target = sprintf('%s/%s-%s.%02d.log', $state['archiveDir'], $channel, $logDate, $seq);
                     if (!file_exists($target)) {
                         file_put_contents($target, $contents);
                         break;
@@ -104,7 +145,7 @@ class BotLog
         } finally {
             flock($lock, LOCK_UN);
             fclose($lock);
-            self::$today = $today;
+            $state['today'] = $today;
         }
     }
 }

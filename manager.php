@@ -89,7 +89,7 @@ class BotManagerDaemon
             }
         }
 
-        // 初始化统一日志通道（logs/bots.log，跨天归档到 logs/bots/）
+        // 初始化统一日志通道（logs/bots.log、logs/http.log，跨天归档到 logs/bot/）
         Utils\BotLog::init($this->baseDir);
 
         // 加载数据库配置
@@ -877,23 +877,40 @@ class BotManagerDaemon
     }
 
     /**
-     * 查看日志（从统一通道过滤该 Bot 的行）
+     * 查看日志：从统一通道及历史归档中精确过滤该 Bot 的行（最近 N 行）
      */
     public function logs(string $botName, int $lines = 50): int
     {
-        $logFile = $this->logsDir . '/bots.log';
-
-        if (!file_exists($logFile)) {
-            echo "没有日志文件\n";
+        if (!preg_match('/^[A-Za-z0-9_-]+$/', $botName)) {
+            echo "无效的 Bot 名称\n";
             return 1;
         }
 
-        echo "最近 {$lines} 行 [{$botName}] 日志:\n";
+        // 数据来源：历史归档（日期+序号正序）在前，当天 bots.log 在最后
+        $files = glob($this->logsDir . '/bot/bots-*.log') ?: [];
+        sort($files);
+        $todayFile = $this->logsDir . '/bots.log';
+        if (is_file($todayFile)) {
+            $files[] = $todayFile;
+        }
+
+        if (empty($files)) {
+            echo "没有任何日志文件\n";
+            return 1;
+        }
+
+        echo "最近 {$lines} 行 [{$botName}] 日志（含历史归档）:\n";
         echo str_repeat('=', 50) . "\n";
 
-        $pattern = '/\[' . preg_quote($botName, '/') . '\]/';
-        system('grep ' . escapeshellarg($pattern) . ' ' . escapeshellarg($logFile)
-            . ' | tail -n ' . (int)$lines);
+        // 锚定行首：[日期 时间] [bot名]，避免误匹配消息内容
+        $pattern = '^\[[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}\] \['
+            . $botName . '\]';
+
+        $cmd = 'grep -hE ' . escapeshellarg($pattern) . ' '
+            . implode(' ', array_map('escapeshellarg', $files))
+            . ' | tail -n ' . (int)$lines;
+
+        system($cmd);
 
         return 0;
     }
