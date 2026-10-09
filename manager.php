@@ -670,9 +670,10 @@ class BotManagerDaemon
                 $errors = 0;
                 $netFails = 0;
 
-                // 仅空轮询时稍作等待；处理过消息立即进入下一次拉取，避免额外 1s 延迟
+                // 仅空轮询时稍作等待；处理过消息立即进入下一次拉取
+                // 间隔 0.3s：消息落在等待窗口最多滞后 0.3s，同时避免空转打满请求
                 if (!$hadUpdates) {
-                    sleep(1);
+                    usleep(300000);
                 }
             } catch (\Throwable $e) {
                 // 数据库类异常：无限等待恢复，绝不退出
