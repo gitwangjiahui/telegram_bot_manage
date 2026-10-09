@@ -8,6 +8,7 @@ use Longman\TelegramBot\Request;
 use Model\VerificationCode;
 use Model\UserVerification;
 use Model\ForwardMap;
+use Model\MessageLog;
 use Utils\Config;
 use Utils\DbManager;
 
@@ -124,8 +125,21 @@ class GenericmessageCommand extends UserCommand
             }
         }
 
+        // 归档用户上行消息（失败静默，不影响收发）
+        $this->recordMessage($message, 'in', $user_id, $user_id);
+
         // 转发消息给所有管理员
         return $this->forwardToAllAdmins($message, $user_id, $chat_id);
+    }
+
+    private function recordMessage($message, string $direction, int $senderId, int $userId): void
+    {
+        try {
+            $botName = $GLOBALS['bot_config']['bot_name'] ?? 'bot1';
+            MessageLog::safeRecord($botName, $message, $direction, $senderId, $userId);
+        } catch (\Throwable $e) {
+            // 静默
+        }
     }
 
     private function getBotId(): int
@@ -240,6 +254,14 @@ class GenericmessageCommand extends UserCommand
         } elseif ($message->getText()) {
             Request::sendMessage(['chat_id' => $target_user_id, 'text' => $message->getText()]);
         }
+
+        // 归档管理员下行消息（失败静默）
+        $this->recordMessage(
+            $message,
+            'out',
+            (int) $message->getFrom()->getId(),
+            (int) $target_user_id
+        );
     }
 
     private function checkAnswer($user_id, $chat_id, $answer): ServerResponse
