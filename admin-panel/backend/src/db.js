@@ -11,6 +11,7 @@ const pool = mysql.createPool({
   connectionLimit: 10,
   charset: 'utf8mb4',
   dateStrings: true,
+  multipleStatements: true,
 });
 
 export async function query(sql, params = []) {
