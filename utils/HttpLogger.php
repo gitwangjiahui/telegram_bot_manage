@@ -126,20 +126,21 @@ class HttpLogger
             }
         }
 
-        // 详细内容写入 http 通道（多行自动缩进）
-        BotLog::writeTo('http', implode(PHP_EOL, $logLines), $botName, 'HTTP');
+        // 成功/失败分流：成功详细日志 → http 通道(保留7天)，失败详细日志 → http-error 通道(保留90天)
+        $isError = $httpCode === null || $httpCode >= 400;
 
-        // 失败请求额外向 bots 通道输出一行摘要
-        if ($httpCode === null || $httpCode >= 400) {
+        if ($isError) {
             $path = preg_replace('#^https?://[^/]+#', '', $url);
-            $summary = sprintf(
-                'HTTP %s %s %s %sms',
+            array_unshift($logLines, sprintf(
+                'HTTP %s %s %sms %s',
                 $httpCode !== null ? $httpCode : 'ERROR',
                 $method,
-                $path,
-                round($duration * 1000)
-            );
-            BotLog::write($summary, $botName, 'HTTP');
+                round($duration * 1000),
+                $path
+            ));
+            BotLog::writeTo('http-error', implode(PHP_EOL, $logLines), $botName, 'HTTP-ERROR');
+        } else {
+            BotLog::writeTo('http', implode(PHP_EOL, $logLines), $botName, 'HTTP');
         }
     }
 

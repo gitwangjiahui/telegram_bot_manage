@@ -3,20 +3,30 @@
 namespace Utils;
 
 /**
- * 统一 Bot 日志通道（支持多通道）
+ * 统一 Bot 日志通道（支持多通道、按保留期滚动删除）
  *
  * 通道：
- *   bots → logs/bots.log  运行日志（所有 Bot 合并，行首标注 bot 名）
- *   http → logs/http.log  HTTP 详细日志（所有 Bot 合并）
+ *   bots       → logs/bots.log        运行日志（所有 Bot 合并，行首标注 bot 名，保留 90 天）
+ *   http       → logs/http.log        HTTP 成功日志（所有 Bot 合并，保留 7 天）
+ *   http-error → logs/http-error.log  HTTP 失败日志（保留 90 天）
  *
- * 跨天时自动归档到 logs/bot/<channel>-YYYY-MM-DD.NN.log
- * 多进程并发安全（copytruncate，持锁复制后清空，inode 不变）
+ * 跨天时自动归档到 logs/<子目录>/<channel>-YYYY-MM-DD.NN.log，并按保留期
+ * 删除过期归档。多进程并发安全（copytruncate，持锁复制后清空，inode 不变）。
  */
 class BotLog
 {
     private static ?string $baseDir = null;
 
-    /** @var array<string, array{file:string, today:string, archiveDir:string}> */
+    /**
+     * 通道配置：归档子目录 + 保留天数
+     */
+    private const CONFIG = [
+        'bots'       => ['subdir' => 'bot',        'retention' => 90],
+        'http'       => ['subdir' => 'http',       'retention' => 7],
+        'http-error' => ['subdir' => 'http-error', 'retention' => 90],
+    ];
+
+    /** @var array<string, array{file:string, today:string, archiveDir:string, retention:int}> */
     private static array $channels = [];
 
     /**
@@ -31,6 +41,11 @@ class BotLog
         }
 
         self::ensureChannel('bots');
+
+        // 启动时清理一次各通道过期归档（部署/重启后立即生效）
+        foreach (self::CONFIG as $channel => $cfg) {
+            self::purge($channel);
+        }
     }
 
     /**
@@ -46,7 +61,7 @@ class BotLog
      */
     public static function writeTo(string $channel, string $message, ?string $bot = null, string $tag = ''): void
     {
-        if (self::$baseDir === null) {
+        if (self::$baseDir === null || !isset(self::CONFIG[$channel])) {
             return;
         }
 
@@ -64,28 +79,21 @@ class BotLog
     }
 
     /**
-     * 各通道对应的归档子目录
-     */
-    private const ARCHIVE_SUBDIR = [
-        'bots' => 'bot',
-        'http' => 'http',
-    ];
-
-    /**
      * 获取（必要时创建）通道状态
      *
-     * @return array{file:string, today:string, archiveDir:string}
+     * @return array{file:string, today:string, archiveDir:string, retention:int}
      */
     private static function &ensureChannel(string $channel): array
     {
         if (!isset(self::$channels[$channel])) {
+            $cfg = self::CONFIG[$channel];
+
             $file = self::$baseDir . "/logs/{$channel}.log";
             if (!file_exists($file)) {
                 touch($file);
             }
 
-            $subdir = self::ARCHIVE_SUBDIR[$channel] ?? $channel;
-            $archiveDir = self::$baseDir . "/logs/{$subdir}";
+            $archiveDir = self::$baseDir . '/logs/' . $cfg['subdir'];
             if (!is_dir($archiveDir)) {
                 mkdir($archiveDir, 0755, true);
             }
@@ -94,6 +102,7 @@ class BotLog
                 'file' => $file,
                 'today' => date('Y-m-d'),
                 'archiveDir' => $archiveDir,
+                'retention' => $cfg['retention'],
             ];
         }
 
@@ -102,9 +111,9 @@ class BotLog
 
     /**
      * 跨天归档：把当前通道文件内容复制到
-     * logs/bot/<channel>-YYYY-MM-DD.NN.log 后清空。
+     * logs/<子目录>/<channel>-YYYY-MM-DD.NN.log 后清空，并清理过期归档。
      *
-     * @param array{file:string, today:string} $state
+     * @param array{file:string, today:string, archiveDir:string, retention:int} $state
      */
     private static function rotate(array &$state, string $channel): void
     {
@@ -146,6 +155,29 @@ class BotLog
             flock($lock, LOCK_UN);
             fclose($lock);
             $state['today'] = $today;
+        }
+
+        self::purge($channel);
+    }
+
+    /**
+     * 按保留期删除该通道过期归档文件（按文件名中的日期判定）
+     */
+    private static function purge(string $channel): void
+    {
+        if (self::$baseDir === null) {
+            return;
+        }
+
+        $state = &self::ensureChannel($channel);
+        $cutoff = date('Y-m-d', strtotime("-{$state['retention']} days"));
+
+        foreach (glob($state['archiveDir'] . "/{$channel}-*.log") ?: [] as $file) {
+            if (preg_match('/(\d{4}-\d{2}-\d{2})\.\d+\.log$/', basename($file), $m)) {
+                if ($m[1] < $cutoff) {
+                    @unlink($file);
+                }
+            }
         }
     }
 }
