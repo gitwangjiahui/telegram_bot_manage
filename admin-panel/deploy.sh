@@ -23,8 +23,8 @@ case "${1:-up}" in
     sleep 4
     CODE=$(curl -sS -o /dev/null -w "%{http_code}" http://127.0.0.1:10001/server/api/health --max-time 5 || echo "000")
     echo "后端 /server/api/health HTTP $CODE"
-    CODE=$(curl -sS -o /dev/null -w "%{http_code}" http://127.0.0.1:27410/ --max-time 5 || echo "000")
-    echo "前端容器(27410) HTTP $CODE"
+    CODE=$(curl -sS -o /dev/null -w "%{http_code}" http://127.0.0.1:11000/ --max-time 5 || echo "000")
+    echo "前端容器(11000) HTTP $CODE"
     echo "对外访问: https://www.95qw.com:8881"
     ;;
   migrate)
