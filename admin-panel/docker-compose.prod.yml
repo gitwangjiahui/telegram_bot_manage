@@ -1,14 +1,16 @@
-# 生产编排（服务器 /app/tg-admin-panel）—— 宿主机 host 网络
-# 复用宿主机 mysql8 容器（127.0.0.1:3306），不重复创建中间件
+# 生产编排（服务器 /app/telegram_bot_manage/admin-panel）—— 宿主机 host 网络
+# 镜像由 GitHub Actions 构建推送到 GHCR，服务器只拉取运行，不在本机构建
+# 复用宿主机 mysql8 容器（127.0.0.1:3306）
 # 端口：27402 后端API / 27410 前端页面（前端容器内 Nginx 反代 /api）
 #
-# 部署：
-#   docker compose -f docker-compose.prod.yml up -d --build
+# 更新部署：
+#   docker compose -f docker-compose.prod.yml pull
+#   docker compose -f docker-compose.prod.yml up -d
 #   docker compose -f docker-compose.prod.yml exec backend node src/scripts/migrate.js
 
 services:
   backend:
-    build: ./backend
+    image: ghcr.io/jh-tgbotmanage/adminserver:${ADMINSERVER_TAG:-latest}
     container_name: tg-admin-backend
     restart: unless-stopped
     network_mode: host
@@ -21,7 +23,7 @@ services:
       - ./logs/backend:/app/logs
 
   frontend:
-    build: ./frontend
+    image: ghcr.io/jh-tgbotmanage/admin:${ADMIN_TAG:-latest}
     container_name: tg-admin-frontend
     restart: unless-stopped
     network_mode: host
