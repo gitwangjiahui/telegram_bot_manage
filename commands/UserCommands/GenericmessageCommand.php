@@ -246,12 +246,16 @@ class GenericmessageCommand extends UserCommand
     {
         if ($this->verificationCode->verify($user_id, $answer)) {
             $this->userVerification->markVerified($user_id);
-            $this->notifyAdminsUserVerified($user_id);
-            
-            return Request::sendMessage([
+
+            // 先回用户成功，再通知管理员，避免用户等待串行通知
+            $response = Request::sendMessage([
                 'chat_id' => $chat_id,
                 'text' => "✅ 验证成功！\n\n欢迎使用，现在可以正常使用了。",
             ]);
+
+            $this->notifyAdminsUserVerified($user_id);
+
+            return $response;
         }
         return Request::sendMessage([
             'chat_id' => $chat_id,
