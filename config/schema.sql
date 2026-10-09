@@ -67,6 +67,20 @@ CREATE TABLE IF NOT EXISTS verification_codes (
     INDEX idx_user_code (bot_name, user_id)
 );
 
+-- 验证码预生成池
+-- 池维护子进程提前生成并上传图片，只存 file_id；/start 直接取用，避免实时上传等待
+CREATE TABLE IF NOT EXISTS captcha_pool (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    bot_name VARCHAR(50) NOT NULL,
+    file_id VARCHAR(255) NOT NULL,
+    code VARCHAR(50) NOT NULL,
+    answer VARCHAR(10) NOT NULL,
+    status ENUM('available','used') NOT NULL DEFAULT 'available',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    used_at TIMESTAMP NULL DEFAULT NULL,
+    INDEX idx_available (bot_name, status)
+);
+
 -- 配置表（全局配置 + Bot 配置）
 -- bot_id IS NULL: 全局配置
 -- bot_id IS NOT NULL: Bot 专属配置

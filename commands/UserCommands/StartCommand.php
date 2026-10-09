@@ -5,8 +5,10 @@ namespace Commands\UserCommands;
 use Longman\TelegramBot\Commands\UserCommand;
 use Longman\TelegramBot\Entities\ServerResponse;
 use Longman\TelegramBot\Request;
+use Model\CaptchaPool;
 use Model\VerificationCode;
 use Model\UserVerification;
+use Utils\BotLog;
 use Utils\DbManager;
 
 class StartCommand extends UserCommand
@@ -36,7 +38,8 @@ class StartCommand extends UserCommand
         $message = $this->getMessage();
         $user_id = $message->getFrom()->getId();
         $chat_id = $message->getChat()->getId();
-        
+        $botName = $GLOBALS['bot_config']['bot_name'] ?? 'bot1';
+
         // 获取管理员配置
         $super_admin_id = $GLOBALS['bot_config']['super_admin_id'] ?? null;
         $is_super_admin = ($user_id == $super_admin_id);
@@ -46,14 +49,31 @@ class StartCommand extends UserCommand
             return Request::emptyResponse();
         }
 
-        // 清除旧验证
+        // 清除旧验证码
         $this->verificationCode->clear($user_id);
 
-        // 生成数学题
+        // 优先取预生成池（file_id 直接发送，无需实时上传）
+        $pool = new CaptchaPool($botName);
+        $item = $pool->acquire();
+
+        if ($item !== null) {
+            // 绑定到当前用户并发题
+            $this->verificationCode->save($user_id, $item['code'], $item['answer']);
+
+            Request::sendPhoto([
+                'chat_id' => $chat_id,
+                'photo'   => $item['file_id'],
+                'caption' => "👋 欢迎使用！\n\n🤖 请计算图片中的数学题\n直接回复答案即可",
+            ]);
+            return Request::emptyResponse();
+        }
+
+        // 池为空（启动初期/突发高峰）→ 降级为实时生成，保证可用
+        BotLog::write('验证码池为空，降级实时生成', $botName, 'POOL');
+
         $math = $this->generateMath();
         $this->verificationCode->save($user_id, $math['question'], $math['answer']);
 
-        // 生成图片
         $image_path = $this->generateImage($math['question']);
 
         Request::sendPhoto([

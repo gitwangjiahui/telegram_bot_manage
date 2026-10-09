@@ -308,6 +308,53 @@ class BotManagerDaemon
     }
 
     /**
+     * fork 验证码池常驻维护进程
+     *
+     * @return int 子进程 PID（0 表示 fork 失败）
+     */
+    private function spawnPoolWorker(array $config, string $botName): int
+    {
+        $token = (string) $config['api_key'];
+        $superAdmin = (int) ($config['super_admin_id'] ?? 0);
+
+        // 存储聊天：优先 config.captcha_chat_id（推荐静音私有频道）；否则用超管个人聊天并在发送后删除
+        $chatId = (int) Utils\Config::get('captcha_chat_id', null, 0);
+        if ($chatId <= 0) {
+            $chatId = $superAdmin;
+            $deleteAfter = true;
+        } else {
+            $deleteAfter = false;
+        }
+
+        if ($token === '' || $chatId <= 0) {
+            $this->log('验证码池未启动：缺少 token 或存储聊天', $botName);
+            return 0;
+        }
+
+        $pid = pcntl_fork();
+        if ($pid === -1) {
+            $this->log('验证码池维护进程 fork 失败', $botName);
+            return 0;
+        }
+
+        if ($pid === 0) {
+            // 子进程
+            $worker = new Utils\CaptchaPoolWorker(
+                $botName,
+                $config['mysql'],
+                $token,
+                $chatId,
+                $deleteAfter
+            );
+            $worker->run();
+            exit(0);
+        }
+
+        $this->log("验证码池维护进程已 fork (PID: {$pid})", $botName);
+        return $pid;
+    }
+
+    /**
      * 从数据库获取 Bot 配置
      */
     private function getBotConfig(string $botName): ?array
@@ -563,6 +610,9 @@ class BotManagerDaemon
         $guzzleClient = new \GuzzleHttp\Client($clientConfig);
         \Longman\TelegramBot\Request::setClient($guzzleClient);
 
+        // fork 常驻验证码池维护进程（启动即预生成，后台动态补货）
+        $poolWorkerPid = $this->spawnPoolWorker($config, $botName);
+
         // 主循环
         $errors = 0;      // 非数据库类连续业务异常（收到 Telegram 响应的真错误，如 401/409）
         $dbFails = 0;     // 数据库类连续异常（无限重试，不退出）
@@ -709,9 +759,21 @@ class BotManagerDaemon
             }
 
             pcntl_signal_dispatch();
+
+            // 非阻塞回收池维护进程，防止意外退出产生僵尸
+            if ($poolWorkerPid > 0) {
+                $done = pcntl_waitpid($poolWorkerPid, $wstatus, WNOHANG);
+                if ($done === $poolWorkerPid) {
+                    $poolWorkerPid = 0;
+                }
+            }
         }
 
         // 清理
+        if ($poolWorkerPid > 0) {
+            posix_kill($poolWorkerPid, SIGTERM);
+            pcntl_waitpid($poolWorkerPid, $wstatus);
+        }
         $this->removePid($botName);
         exit(0);
     }
