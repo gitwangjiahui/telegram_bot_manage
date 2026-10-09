@@ -2,9 +2,9 @@
 # TG 机器人管理后台生产部署脚本（只拉取 GHCR 镜像，不在服务器构建）
 # 用法:
 #   bash deploy.sh            # 拉取最新镜像并滚动更新
-#   bash deploy.sh migrate    # 执行数据库迁移（建表/权限/初始管理员）
-#   bash deploy.sh backfill [--apply]  # 旧消息回填
-#   bash deploy.sh logs <svc> # 查看 backend/frontend 日志
+#   bash deploy.sh migrate    # 数据库迁移（建表/权限/初始管理员）
+#   bash deploy.sh backfill [--apply]
+#   bash deploy.sh logs <svc>
 set -euo pipefail
 
 DEPLOY_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -21,11 +21,11 @@ case "${1:-up}" in
     $COMPOSE up -d
     docker image prune -f >/dev/null 2>&1 || true
     sleep 4
-    CODE=$(curl -sS -o /dev/null -w "%{http_code}" http://127.0.0.1:27402/api/health --max-time 5 || echo "000")
-    echo "后端 /api/health HTTP $CODE"
+    CODE=$(curl -sS -o /dev/null -w "%{http_code}" http://127.0.0.1:10001/server/api/health --max-time 5 || echo "000")
+    echo "后端 /server/api/health HTTP $CODE"
     CODE=$(curl -sS -o /dev/null -w "%{http_code}" http://127.0.0.1:27410/ --max-time 5 || echo "000")
-    echo "前端页面 HTTP $CODE"
-    echo "访问: http://<服务器IP>:27410"
+    echo "前端容器(27410) HTTP $CODE"
+    echo "对外访问: https://www.95qw.com:8881"
     ;;
   migrate)
     $COMPOSE exec backend node src/scripts/migrate.js

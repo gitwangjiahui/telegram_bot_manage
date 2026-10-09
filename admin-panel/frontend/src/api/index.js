@@ -1,6 +1,8 @@
 import axios from 'axios';
 
-const api = axios.create({ baseURL: '/api' });
+// 生产：页面与接口同域，接口经 Nginx /server/ 转发到后端
+// 本地 dev：vite 把 /server 代理到本地后端
+const api = axios.create({ baseURL: '/server/api' });
 
 api.interceptors.request.use((cfg) => {
   const token = localStorage.getItem('token');

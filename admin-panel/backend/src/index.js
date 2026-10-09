@@ -16,19 +16,23 @@ const app = express();
 app.use(cors());
 app.use(express.json({ limit: '2mb' }));
 
-app.get('/api/health', (req, res) => res.json({ ok: true }));
-app.use('/api/auth', authRoutes);
+// 所有业务 API 统一前缀（生产 /server/api，本地开发可用 /api）
+const BASE = config.basePath;
 
-app.use('/api/dashboard', authRequired, dashboardRoutes);
-app.use('/api/bots', authRequired, botsRoutes);
-app.use('/api/users', authRequired, usersRoutes);
-app.use('/api/forward', authRequired, forwardRoutes);
-app.use('/api/config', authRequired, configRoutes);
-app.use('/api/messages', authRequired, messagesRoutes);
-app.use('/api/system', authRequired, systemRoutes);
+app.get('/api/health', (req, res) => res.json({ ok: true }));
+app.get(`${BASE}/health`, (req, res) => res.json({ ok: true }));
+app.use(`${BASE}/auth`, authRoutes);
+
+app.use(`${BASE}/dashboard`, authRequired, dashboardRoutes);
+app.use(`${BASE}/bots`, authRequired, botsRoutes);
+app.use(`${BASE}/users`, authRequired, usersRoutes);
+app.use(`${BASE}/forward`, authRequired, forwardRoutes);
+app.use(`${BASE}/config`, authRequired, configRoutes);
+app.use(`${BASE}/messages`, authRequired, messagesRoutes);
+app.use(`${BASE}/system`, authRequired, systemRoutes);
 
 // 当前登录者信息（菜单权限）
-app.get('/api/me', authRequired, (req, res) => {
+app.get(`${BASE}/me`, authRequired, (req, res) => {
   res.json({
     id: req.user.id,
     username: req.user.username,
@@ -46,5 +50,5 @@ app.use((err, req, res, next) => {
 });
 
 app.listen(config.port, () => {
-  console.log(`Admin API listening on :${config.port}`);
+  console.log(`Admin API listening on :${config.port} (base ${BASE})`);
 });

@@ -3,7 +3,9 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 export const config = {
-  port: parseInt(process.env.PORT || '3000', 10),
+  port: parseInt(process.env.PORT || '10001', 10),
+  // 生产环境经宿主 Nginx location /server/ 反代，路由统一前缀 /server/api
+  basePath: process.env.API_BASE_PATH || '/server/api',
   jwtSecret: process.env.JWT_SECRET || 'change-me-in-production',
   jwtExpires: process.env.JWT_EXPIRES || '7d',
   db: {
