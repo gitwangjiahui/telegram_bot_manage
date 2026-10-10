@@ -18,6 +18,13 @@ router.get('/', requirePerm('bot:view'), async (req, res, next) => {
                        WHERE c.bot_id = b.id AND c.status = 'done'
                        ORDER BY c.id DESC LIMIT 1) = 'stop'
                 THEN 0
+                WHEN (SELECT c.action FROM bot_control c
+                       WHERE c.bot_id = b.id AND c.status = 'done'
+                       ORDER BY c.id DESC LIMIT 1) IN ('start','restart')
+                 AND (SELECT c.executed_at FROM bot_control c
+                       WHERE c.bot_id = b.id AND c.status = 'done'
+                       ORDER BY c.id DESC LIMIT 1) >= DATE_SUB(NOW(), INTERVAL 120 SECOND)
+                THEN 1
                 WHEN hb.heartbeat_at >= DATE_SUB(NOW(), INTERVAL 90 SECOND)
                 THEN 1 ELSE 0 END AS is_running,
               (SELECT COUNT(DISTINCT uv.user_id) FROM user_verification uv
