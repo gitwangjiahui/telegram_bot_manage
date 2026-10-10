@@ -10,6 +10,10 @@ body {
     'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
   background: #f0f2f5;
 }
+/* 表单标签：统一单行不换行，避免长标签被挤成两行 */
+.el-form-item__label {
+  white-space: nowrap;
+}
 .page-card {
   margin: 16px;
 }

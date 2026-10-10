@@ -43,7 +43,7 @@
           <el-input v-model="form.api_key" type="password" show-password
                     :placeholder="form.id ? '留空则不修改' : 'BotFather 获取的 Token'" />
         </el-form-item>
-        <el-form-item label="显示名/用户名">
+        <el-form-item label="显示名">
           <el-input v-model="form.bot_username" />
         </el-form-item>
         <el-form-item label="启用">

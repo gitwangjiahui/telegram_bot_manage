@@ -81,7 +81,7 @@
             <el-option v-for="b in bots" :key="b.id" :label="b.bot_name" :value="b.id" />
           </el-select>
         </el-form-item>
-        <el-form-item label="TG 用户ID" required>
+        <el-form-item label="用户ID" required>
           <el-input v-model.number="addAdminForm.admin_id" />
         </el-form-item>
         <el-form-item label="类型">
