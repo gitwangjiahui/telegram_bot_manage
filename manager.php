@@ -779,6 +779,134 @@ class BotManagerDaemon
     }
 
     /**
+     * 常驻监控者：每 30s 对账 bots 表与实际进程
+     *   is_active=1 且无存活 PID → start
+     *   is_active=0 但进程存活    → stop
+     * 纯 PHP CLI 无原生协程，用单进程 + 可中断 sleep tick 实现（等价轻量协程调度，不额外占资源）
+     */
+    public function watch(?int $interval = 30): int
+    {
+        $interval = $interval && $interval >= 5 ? $interval : 30;
+
+        // 单实例：避免多个 watcher 重复拉起
+        $wPid = $this->readPid('__watcher');
+        if ($this->isRunning($wPid)) {
+            $this->output("监控者已在运行 (PID: {$wPid})", 'manager');
+            return 0;
+        }
+
+        $pid = pcntl_fork();
+        if ($pid === -1) {
+            fwrite(STDERR, "错误: 无法 fork 监控者\n");
+            return 1;
+        } elseif ($pid > 0) {
+            sleep(1);
+            return 0;
+        }
+
+        // 子进程：守护化
+        if (posix_setsid() === -1) {
+            exit(1);
+        }
+        $pid2 = pcntl_fork();
+        if ($pid2 === -1) exit(1);
+        if ($pid2 > 0) exit(0);
+
+        $daemonPid = posix_getpid();
+        $this->writePid('__watcher', $daemonPid);
+
+        // 重定向标准 IO 到日志（startSingle/stopSingle 内部会 echo）
+        $watchLog = $this->logsDir . '/watcher.log';
+        fclose(STDIN); fclose(STDOUT); fclose(STDERR);
+        $stdIn = fopen('/dev/null', 'r');
+        $stdOut = fopen($watchLog, 'a');
+        $stdErr = fopen($watchLog, 'a');
+
+        $running = true;
+        pcntl_signal(SIGTERM, function () use (&$running) { $running = false; });
+        pcntl_signal(SIGINT, function () use (&$running) { $running = false; });
+
+        $this->log('=== Bot watcher started ===', 'manager');
+
+        while ($running) {
+            pcntl_signal_dispatch();
+
+            try {
+                $this->reconcileOnce();
+            } catch (\Throwable $e) {
+                // 任何异常（含 DB 不可用）都不退出，下个 tick 重试
+                $this->log('watcher 对账异常: ' . $e->getMessage(), 'manager');
+            }
+
+            // 可中断 sleep：每秒醒来处理信号，到点立即对账
+            for ($i = 0; $i < $interval && $running; $i++) {
+                sleep(1);
+                pcntl_signal_dispatch();
+            }
+        }
+
+        $this->log('=== Bot watcher stopped ===', 'manager');
+        $this->removePid('__watcher');
+        exit(0);
+    }
+
+    /**
+     * 执行一次表与进程的对账
+     */
+    private function reconcileOnce(): void
+    {
+        $bots = $this->getAllBots();
+        if (empty($bots)) {
+            return; // DB 查询失败或无记录，不动作
+        }
+
+        foreach ($bots as $bot) {
+            $name = $bot['bot_name'];
+            $isActive = (int) $bot['is_active'] === 1;
+            $pid = $this->readPid($name);
+            $alive = $this->isRunning($pid);
+
+            if ($isActive && !$alive) {
+                if ($pid) $this->removePid($name);
+                $this->log("检测到 {$name} 应运行但未运行，自动拉起", 'manager');
+                $code = $this->startSingle($name);
+                if ($code === 0) {
+                    $this->log("已自动拉起 {$name}", 'manager');
+                } else {
+                    $this->log("自动拉起 {$name} 失败 (code={$code})", 'manager');
+                }
+            } elseif (!$isActive && $alive) {
+                $this->log("检测到 {$name} 已停用但进程存活，自动停止", 'manager');
+                $this->stopSingle($name);
+                $this->log("已自动停止 {$name}", 'manager');
+            }
+        }
+    }
+
+    /**
+     * 停止监控者
+     */
+    public function stopWatcher(): int
+    {
+        $wPid = $this->readPid('__watcher');
+        if (!$this->isRunning($wPid)) {
+            $this->removePid('__watcher');
+            $this->output("监控者未运行", 'manager');
+            return 0;
+        }
+        posix_kill($wPid, SIGTERM);
+        $waited = 0;
+        while ($this->isRunning($wPid) && $waited < 8) {
+            sleep(1);
+            $waited++;
+        }
+        if ($this->isRunning($wPid)) posix_kill($wPid, SIGKILL);
+        $this->removePid('__watcher');
+        $this->output("监控者已停止", 'manager');
+        return 0;
+    }
+
+    /**
      * 停止 Bot
      */
     public function stop(?string $botName = null): int
@@ -993,6 +1121,13 @@ switch ($command) {
     case 'stop':
         exit($manager->stop($botName));
 
+    case 'watch':
+        $watchInterval = isset($argv[2]) ? (int)$argv[2] : 30;
+        exit($manager->watch($watchInterval));
+
+    case 'unwatch':
+        exit($manager->stopWatcher());
+
     case 'restart':
         exit($manager->restart($botName));
 
@@ -1019,6 +1154,8 @@ switch ($command) {
         echo "  stop      [bot_name]  停止 Bot（默认全部运行中的）\n";
         echo "  restart   [bot_name]  重启 Bot（默认全部运行中的）\n";
         echo "  status    [bot_name]  查看状态（默认全部）\n";
+        echo "  watch     [间隔秒]    启动常驻监控者，自动拉起新增/掉线的 Bot、停用已禁用的 Bot（默认 30s）\n";
+        echo "  unwatch               停止常驻监控者\n";
         echo "  list                  列出所有 Bot\n";
         echo "  logs      <bot_name>  [行数] 查看日志（默认 50 行）\n";
         exit(0);
