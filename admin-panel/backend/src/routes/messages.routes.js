@@ -39,8 +39,12 @@ const CONVERSATION_SQL = `
         ON f.forwarded_msg_id = m.reply_to_message
      WHERE f.bot_name = ? AND f.user_id = ?
     UNION
-    SELECT ml.id, 0, ml.message_id, ml.direction,
-           ml.sender_id, ml.msg_type, ml.text_content, ml.created_at
+    SELECT ml.id, 0, ml.message_id,
+           ml.direction COLLATE utf8mb4_unicode_520_ci AS direction,
+           ml.sender_id,
+           ml.msg_type COLLATE utf8mb4_unicode_520_ci AS msg_type,
+           ml.text_content COLLATE utf8mb4_unicode_520_ci AS text_content,
+           ml.created_at
       FROM message_log ml
      WHERE ml.bot_name = ? AND ml.user_id = ? AND ml.sender_id = 0
 `;
