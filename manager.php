@@ -1020,24 +1020,29 @@ class BotManagerDaemon
             return 1;
         }
 
-        $pid = pcntl_fork();
-        if ($pid === -1) { fwrite(STDERR, "错误: 无法 fork 监管者\n"); return 1; }
-        if ($pid > 0) { sleep(1); return 0; }
-
-        if (posix_setsid() === -1) exit(1);
-        $pid2 = pcntl_fork();
-        if ($pid2 === -1) exit(1);
-        if ($pid2 > 0) exit(0);
-
-        $daemonPid = posix_getpid();
+        // 用 Swoole 安全守护（内部完成 setsid+二次fork，且在协程初始化前调用不会冲突）
+        // nochdir=true 保留当前目录；noclose=true 保留标准 IO，下面自行重定向到日志
+        $daemonPid = \Swoole\Process::daemon(true, true);
+        if (!$daemonPid) {
+            fwrite(STDERR, "错误: 无法守护化\n");
+            return 1;
+        }
         $this->writePid('__supervisor', $daemonPid);
 
-        // 重定向标准 IO；子进程继承该 fd，故各 Bot 输出也进 supervisor.log
+        // 重定向标准 IO；worker 子进程通过 exec 独立运行，不继承此 fd
         $svLog = $this->logsDir . '/supervisor.log';
         fclose(STDIN); fclose(STDOUT); fclose(STDERR);
         $stdIn = fopen('/dev/null', 'r');
         $stdOut = fopen($svLog, 'a');
         $stdErr = fopen($svLog, 'a');
+
+        // 捕获守护阶段致命错误，避免静默退出
+        register_shutdown_function(function () use ($svLog) {
+            $e = error_get_last();
+            if ($e && in_array($e['type'], [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR], true)) {
+                @file_put_contents($svLog, '[fatal] ' . $e['message'] . " @{$e['file']}:{$e['line']}\n", FILE_APPEND);
+            }
+        });
 
         $this->log('=== Swoole supervisor started ===', 'manager');
 
