@@ -8,10 +8,9 @@
       <el-menu :default-active="$route.path" router background-color="#1f2d3d"
                text-color="#bfcbd9" active-text-color="#409eff">
         <el-menu-item index="/dashboard"><el-icon><Odometer /></el-icon><span>仪表盘</span></el-menu-item>
-        <el-menu-item index="/bots"><el-icon><Monitor /></el-icon><span>机器人管理</span></el-menu-item>
+        <el-menu-item index="/bots"><el-icon><Monitor /></el-icon><span>机器人与转发</span></el-menu-item>
         <el-menu-item index="/users"><el-icon><User /></el-icon><span>用户管理</span></el-menu-item>
         <el-menu-item v-if="auth.has('user:admin:manage')" index="/admins"><el-icon><UserFilled /></el-icon><span>TG管理员</span></el-menu-item>
-        <el-menu-item index="/forward"><el-icon><Switch /></el-icon><span>转发设置</span></el-menu-item>
         <el-menu-item index="/config"><el-icon><Setting /></el-icon><span>配置管理</span></el-menu-item>
         <el-menu-item index="/messages"><el-icon><ChatLineRound /></el-icon><span>历史消息</span></el-menu-item>
         <el-sub-menu v-if="auth.has('system:view')" index="system">

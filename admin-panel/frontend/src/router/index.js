@@ -12,7 +12,6 @@ const routes = [
       { path: 'bots/:id', name: '机器人详情', component: () => import('../views/BotDetail.vue'), meta: { perm: 'bot:view' } },
       { path: 'users', name: '用户管理', component: () => import('../views/Users.vue'), meta: { perm: 'user:view' } },
       { path: 'admins', name: 'TG管理员', component: () => import('../views/Admins.vue'), meta: { perm: 'user:admin:manage' } },
-      { path: 'forward', name: '转发设置', component: () => import('../views/Forward.vue'), meta: { perm: 'forward:view' } },
       { path: 'config', name: '配置管理', component: () => import('../views/ConfigManage.vue'), meta: { perm: 'config:view' } },
       { path: 'messages', name: '历史消息', component: () => import('../views/Messages.vue'), meta: { perm: 'message:view' } },
       { path: 'system/admins', name: '后台账号', component: () => import('../views/system/Admins.vue'), meta: { perm: 'system:view' } },
