@@ -69,7 +69,7 @@
               <div class="bar out" :style="{ height: barH(d.outbound) }" />
             </el-tooltip>
           </div>
-          <div class="bar-label">{{ d.day.slice(8) }}</div>
+          <div class="bar-label">{{ d.day.slice(5) }}</div>
         </div>
       </div>
       <div class="legend">
@@ -167,13 +167,13 @@ onUnmounted(() => timer && clearInterval(timer));
 .err { color: #F56C6C; font-size: 12px; }
 .ok-text { color: #c0c4cc; font-size: 12px; }
 
-.bars { display: flex; align-items: flex-end; gap: 6px; height: 160px; padding: 8px 4px; overflow-x: auto; }
-.bar-col { display: flex; flex-direction: column; align-items: center; flex: 0 0 auto; min-width: 26px; }
-.bar-pair { display: flex; align-items: flex-end; gap: 2px; height: 130px; }
-.bar { width: 10px; border-radius: 2px 2px 0 0; cursor: default; }
+.bars { display: flex; align-items: flex-end; justify-content: space-between; gap: 2px; height: 160px; padding: 8px 0; }
+.bar-col { display: flex; flex-direction: column; align-items: center; flex: 1 1 0; min-width: 0; }
+.bar-pair { display: flex; align-items: flex-end; justify-content: center; gap: 2px; width: 100%; height: 130px; }
+.bar { flex: 1 1 0; max-width: 12px; border-radius: 2px 2px 0 0; cursor: default; }
 .bar.in { background: linear-gradient(#42b883, #2f9e6c); }
 .bar.out { background: linear-gradient(#2aabee, #1f86c4); }
-.bar-label { margin-top: 6px; font-size: 11px; color: #909399; }
+.bar-label { margin-top: 6px; font-size: 10px; color: #909399; white-space: nowrap; transform: scale(0.92); }
 .legend { display: flex; gap: 20px; font-size: 12px; color: #606266; margin-top: 4px; }
 .sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; }
 .sw.in { background: #2f9e6c; }
