@@ -74,7 +74,15 @@ function formatSize(bytes) {
 <style scoped>
 .media-wrap { min-width: 180px; }
 .photo {
-  max-width: 320px; max-height: 360px; border-radius: 8px; display: block; cursor: zoom-in;
+  border-radius: 8px; cursor: zoom-in; display: block;
+  max-width: 320px;
+}
+/* el-image 内部 img 默认 width/height:100%，容器若只有 max-* 会塌缩为 0。
+   改为自然尺寸 + 上限约束，保持原图比例正常显示。 */
+.photo :deep(.el-image__inner) {
+  width: auto; height: auto; display: block;
+  max-width: 320px; max-height: 360px;
+  border-radius: 8px; object-fit: contain;
 }
 .sticker { width: 150px; height: 150px; object-fit: contain; }
 .tgs-fallback {
