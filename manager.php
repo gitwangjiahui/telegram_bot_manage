@@ -609,6 +609,18 @@ class BotManagerDaemon
         $stdOut = fopen($logFile, 'a');
         $stdErr = fopen($logFile, 'a');
 
+
+        // 运行 Bot 工作主体（与 supervisor 管理的子进程共用同一实现）
+        $this->runBotWorker($config, $botName);
+
+    }
+
+    /**
+     * Bot 工作主体：初始化连接/HTTP 客户端/验证码池并进入拉取循环。
+     * daemonize 模式与 Swoole supervisor 的子进程（worker 命令）共用此实现。
+     */
+    private function runBotWorker(array $config, string $botName): void
+    {
         // 设置当前 bot 名称（用于日志）
         $this->setCurrentBot($botName);
         
@@ -965,6 +977,219 @@ class BotManagerDaemon
     }
 
     /**
+     * Worker：前台运行单个 Bot（供 Swoole supervisor 以子进程 exec 调用，非守护化）
+     */
+    public function runWorker(string $botName): int
+    {
+        $this->setCurrentBot($botName);
+        $config = $this->getBotConfig($botName);
+        if (!$config) {
+            fwrite(STDERR, "错误: Bot '{$botName}' 不存在或未激活\n");
+            return 2;
+        }
+        if (!is_dir($config['bot_dir'])) {
+            mkdir($config['bot_dir'], 0755, true);
+        }
+        Utils\BotLog::init($this->baseDir, $botName);
+        $GLOBALS['bot_config'] = $config;
+        $this->runBotWorker($config, $botName);
+        return 0;
+    }
+
+    /**
+     * Swoole 协程监管者：
+     *   - 每个 is_active=1 的 Bot 作为一个受管子进程（exec `worker`）
+     *   - 协程 wait 即时感知子进程退出，按指数退避自动重启（崩溃秒级拉起）
+     *   - 周期对账 bots 表：新增即拉起、停用/删除即优雅停止
+     * 相比 watch 的定时轮询，崩溃恢复更快、生命周期统一由监管进程持有。
+     */
+    public function supervise(?int $scan = 10): int
+    {
+        $scan = ($scan && $scan >= 3) ? $scan : 10;
+
+        // 单实例
+        $sPid = $this->readPid('__supervisor');
+        if ($this->isRunning($sPid)) {
+            $this->output("监管者已在运行 (PID: {$sPid})", 'manager');
+            return 0;
+        }
+        // 旧 watcher 仍在运行时拒绝，避免双重拉起
+        $wPid = $this->readPid('__watcher');
+        if ($this->isRunning($wPid)) {
+            $this->output("旧监控者仍在运行，请先执行 php manager.php unwatch", 'manager');
+            return 1;
+        }
+
+        $pid = pcntl_fork();
+        if ($pid === -1) { fwrite(STDERR, "错误: 无法 fork 监管者\n"); return 1; }
+        if ($pid > 0) { sleep(1); return 0; }
+
+        if (posix_setsid() === -1) exit(1);
+        $pid2 = pcntl_fork();
+        if ($pid2 === -1) exit(1);
+        if ($pid2 > 0) exit(0);
+
+        $daemonPid = posix_getpid();
+        $this->writePid('__supervisor', $daemonPid);
+
+        // 重定向标准 IO；子进程继承该 fd，故各 Bot 输出也进 supervisor.log
+        $svLog = $this->logsDir . '/supervisor.log';
+        fclose(STDIN); fclose(STDOUT); fclose(STDERR);
+        $stdIn = fopen('/dev/null', 'r');
+        $stdOut = fopen($svLog, 'a');
+        $stdErr = fopen($svLog, 'a');
+
+        $this->log('=== Swoole supervisor started ===', 'manager');
+
+        $baseDir = $this->baseDir;
+        $self = $this;
+
+        \Swoole\Coroutine\run(function () use ($scan, $baseDir, $self) {
+            // name => {desired,pid,phase(stopped/running/restarting),restarts,proc,startedAt}
+            $state = [];
+            $pidIndex = []; // pid => name
+            $stopping = false;
+
+            $spawn = function (string $name) use (&$state, &$pidIndex, $baseDir, $self) {
+                $process = new \Swoole\Process(
+                    function ($p) use ($name, $baseDir) {
+                        $p->exec(PHP_BINARY, [$baseDir . '/manager.php', 'worker', $name]);
+                    },
+                    false, 0, false
+                );
+                $pid = $process->start();
+                if ($pid > 0) {
+                    $state[$name]['proc'] = $process;
+                    $state[$name]['pid'] = $pid;
+                    $state[$name]['phase'] = 'running';
+                    $state[$name]['startedAt'] = time();
+                    $pidIndex[$pid] = $name;
+                    $self->log("supervisor 拉起 {$name} (pid={$pid})", 'manager');
+                } else {
+                    $state[$name]['phase'] = 'stopped';
+                    $self->log("supervisor 拉起 {$name} 失败", 'manager');
+                }
+            };
+
+            // 协程①：即时回收退出子进程并按退避重启
+            go(function () use (&$state, &$pidIndex, &$stopping, $spawn, $self) {
+                while (!$stopping) {
+                    $r = \Swoole\Process::wait(true);
+                    if (!$r) { \Swoole\Coroutine::sleep(0.5); continue; }
+                    $name = $pidIndex[$r['pid']] ?? null;
+                    if ($name === null) continue;
+                    unset($pidIndex[$r['pid']]);
+                    $state[$name]['pid'] = 0;
+                    $state[$name]['phase'] = 'stopped';
+                    $state[$name]['proc'] = null;
+
+                    if (!$state[$name]['desired']) continue;
+
+                    $lived = time() - $state[$name]['startedAt'];
+                    if ($lived >= 60) $state[$name]['restarts'] = 0;
+                    $state[$name]['restarts']++;
+                    $delay = min(2 ** min($state[$name]['restarts'], 5), 30);
+                    $self->log("{$name} 退出(code={$r['code']},sig={$r['signal']})，{$delay}s 后重启", 'manager');
+
+                    $state[$name]['phase'] = 'restarting';
+                    go(function () use ($name, $delay, $spawn, &$state) {
+                        \Swoole\Coroutine::sleep($delay);
+                        if ($state[$name]['desired'] && $state[$name]['phase'] === 'restarting') {
+                            $spawn($name);
+                        }
+                    });
+                }
+            });
+
+            // 协程②：周期对账 bots 表
+            go(function () use ($scan, &$state, $spawn, $self, &$stopping) {
+                while (!$stopping) {
+                    \Swoole\Coroutine::sleep($scan);
+                    if ($stopping) break;
+                    $bots = $self->getAllBots();
+                    if (empty($bots)) continue;
+                    $seen = [];
+                    foreach ($bots as $bot) {
+                        $name = $bot['bot_name'];
+                        $seen[$name] = true;
+                        $desired = (int)$bot['is_active'] === 1;
+                        if (!isset($state[$name])) {
+                            $state[$name] = [
+                                'desired' => $desired, 'pid' => 0, 'phase' => 'stopped',
+                                'restarts' => 0, 'proc' => null, 'startedAt' => 0,
+                            ];
+                        }
+                        $st = &$state[$name];
+                        $st['desired'] = $desired;
+                        if ($desired && !$st['pid'] && $st['phase'] === 'stopped') {
+                            $spawn($name);
+                        } elseif (!$desired && $st['pid']) {
+                            $self->log("{$name} 已停用，发送停止信号", 'manager');
+                            if ($st['proc'] !== null) $st['proc']->kill(SIGTERM);
+                        }
+                        unset($st);
+                    }
+                    // DB 中已删除的 Bot：停止残留子进程
+                    foreach ($state as $name => $st) {
+                        if (!isset($seen[$name]) && $st['pid']) {
+                            $st['desired'] = false;
+                            if ($st['proc'] !== null) $st['proc']->kill(SIGTERM);
+                            $self->log("{$name} 已从数据库删除，停止子进程", 'manager');
+                        }
+                    }
+                }
+            });
+
+            // 信号：优雅停止监管者与全部子进程
+            \Swoole\Process::signal(SIGTERM, function () use (&$stopping, &$state) {
+                $stopping = true;
+                foreach ($state as $st) {
+                    if ($st['pid']) { $st['desired'] = false; if ($st['proc'] !== null) $st['proc']->kill(SIGTERM); }
+                }
+            });
+            \Swoole\Process::signal(SIGINT, function () use (&$stopping, &$state) {
+                $stopping = true;
+                foreach ($state as $st) {
+                    if ($st['pid']) { $st['desired'] = false; if ($st['proc'] !== null) $st['proc']->kill(SIGTERM); }
+                }
+            });
+
+            // 监管进程自身常驻（被信号置 stopping 后，等其余协程退出）
+            while (!$stopping) {
+                \Swoole\Coroutine::sleep(1);
+            }
+            \Swoole\Coroutine::sleep(2);
+        });
+
+        $this->log('=== Swoole supervisor stopped ===', 'manager');
+        $this->removePid('__supervisor');
+        exit(0);
+    }
+
+    /**
+     * 停止 Swoole 监管者
+     */
+    public function stopSupervisor(): int
+    {
+        $sPid = $this->readPid('__supervisor');
+        if (!$this->isRunning($sPid)) {
+            $this->removePid('__supervisor');
+            $this->output("监管者未运行", 'manager');
+            return 0;
+        }
+        posix_kill($sPid, SIGTERM);
+        $waited = 0;
+        while ($this->isRunning($sPid) && $waited < 12) {
+            sleep(1);
+            $waited++;
+        }
+        if ($this->isRunning($sPid)) posix_kill($sPid, SIGKILL);
+        $this->removePid('__supervisor');
+        $this->output("监管者已停止", 'manager');
+        return 0;
+    }
+
+    /**
      * 停止 Bot
      */
     public function stop(?string $botName = null): int
@@ -1186,6 +1411,13 @@ switch ($command) {
     case 'unwatch':
         exit($manager->stopWatcher());
 
+    case 'supervise':
+        $scanInterval = isset($argv[2]) ? (int)$argv[2] : 10;
+        exit($manager->supervise($scanInterval));
+
+    case 'unsupervise':
+        exit($manager->stopSupervisor());
+
     case 'restart':
         exit($manager->restart($botName));
 
@@ -1214,6 +1446,8 @@ switch ($command) {
         echo "  status    [bot_name]  查看状态（默认全部）\n";
         echo "  watch     [间隔秒]    启动常驻监控者，自动拉起新增/掉线的 Bot、停用已禁用的 Bot（默认 30s）\n";
         echo "  unwatch               停止常驻监控者\n";
+        echo "  supervise [扫描秒]    启动 Swoole 协程监管者：直接持有各 Bot 子进程，崩溃秒级重启（默认 10s 对账）\n";
+        echo "  unsupervise           停止 Swoole 监管者\n";
         echo "  list                  列出所有 Bot\n";
         echo "  logs      <bot_name>  [行数] 查看日志（默认 50 行）\n";
         exit(0);
