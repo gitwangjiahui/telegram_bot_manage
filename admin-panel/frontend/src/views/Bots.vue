@@ -347,9 +347,32 @@ function finishPending(id, ok, resultMsg) {
   delete pendingMap[id];
 
   const verb = ACTION_TEXT[entry.action] || '操作';
-  if (ok) ElMessage.success(`${verb}成功`);
-  else ElMessage.error(`${verb}失败：${resultMsg || '未知错误'}`);
-  load();
+  if (ok) {
+    ElMessage.success(`${verb}成功`);
+    // 同步本地状态：直接改这张卡，不等 /bots 心跳（旧心跳 90 秒内仍会误判运行中）
+    applyLocalState(id, entry.action);
+  } else {
+    ElMessage.error(`${verb}失败：${resultMsg || '未知错误'}`);
+    load();
+  }
+}
+
+// 按动作即时更新卡片本地状态。
+function applyLocalState(id, action) {
+  const b = bots.value.find((x) => Number(x.id) === Number(id));
+  if (!b) { load(); return; }
+  if (action === 'stop') {
+    b.is_running = 0;
+    b.last_error = null;
+  } else if (action === 'start') {
+    b.is_running = 1;
+    b.last_error = null;
+  } else if (action === 'restart') {
+    b.is_running = 1;
+    b.last_error = null;
+  }
+  // 后台静默校正（不覆盖刚改的即时状态感：稍候等心跳跟上）
+  setTimeout(load, 3000);
 }
 
 function pendingText(b) {

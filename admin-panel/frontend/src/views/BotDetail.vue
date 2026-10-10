@@ -189,7 +189,14 @@ async function control(action) {
     ElMessage[ok ? 'success' : 'error'](
       ok ? `${ {start:'启动',stop:'停止',restart:'重启'}[action] }成功`
          : `${ {start:'启动',stop:'停止',restart:'重启'}[action] }失败：${data.result || ''}`);
-    loadBot();
+    if (ok && bot.value) {
+      // 同步本地状态，不等 loadBot 拉旧心跳
+      bot.value.is_running = action === 'stop' ? 0 : 1;
+      bot.value.last_error = null;
+      setTimeout(loadBot, 3000);
+    } else {
+      loadBot();
+    }
   });
 }
 
