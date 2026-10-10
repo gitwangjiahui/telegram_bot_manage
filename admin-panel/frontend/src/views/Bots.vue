@@ -3,114 +3,89 @@
     <!-- 页头 -->
     <div class="page-top">
       <div>
-        <h2 class="page-h2">机器人与转发</h2>
-        <p class="page-desc">统一管理每个机器人的运行状态与转发目标；消息会实时转发给卡片内的管理员，管理员可直接回复用户。</p>
+        <h2 class="page-h2">机器人</h2>
+        <p class="page-desc">查看每个机器人的实时运行状态，进行进程控制与转发设置。</p>
       </div>
       <div class="page-tools">
         <el-switch v-model="autoRefresh" inline-prompt active-text="自动刷新" />
         <el-button :icon="Refresh" @click="load">刷新</el-button>
-        <el-button v-if="auth.has('bot:create')" type="primary" :icon="Plus" @click="openEdit()">新增机器人</el-button>
+        <el-button v-if="auth.has('bot:create')" type="primary" :icon="Plus" @click.stop="openEdit()">新增机器人</el-button>
       </div>
     </div>
 
-    <el-row v-loading="loading" :gutter="18">
-      <el-col v-for="b in bots" :key="b.id" :xs="24" :sm="12" :lg="8" style="margin-bottom: 18px">
-        <div class="rcard" :class="Number(b.is_running) ? 'is-up' : 'is-down'">
-          <!-- 卡片头部 -->
-          <div class="rc-head">
-            <div class="rc-ava">{{ b.bot_name.slice(0, 1).toUpperCase() }}</div>
-            <div class="rc-id">
-              <div class="rc-name-row">
-                <span class="rc-name">{{ b.bot_name }}</span>
-                <span class="rc-badge">{{ Number(b.is_running) ? '运行中' : '已停止' }}</span>
-              </div>
-              <div class="rc-sub">{{ b.bot_username || '未设置显示名' }}</div>
-            </div>
-          </div>
-
-          <!-- 状态指标 -->
-          <div class="rc-metrics">
-            <div class="m">
-              <span class="mv">{{ b.pid ?? '—' }}</span><span class="mk">PID</span>
-            </div>
-            <div class="m">
-              <span class="mv">{{ uptime(b) }}</span><span class="mk">已运行</span>
-            </div>
-            <div class="m">
-              <span class="mv">{{ b.captcha_available ?? 0 }}</span><span class="mk">验证码池</span>
-            </div>
-            <div class="m">
-              <span class="mv">{{ b.today_in ?? 0 }}/{{ b.today_out ?? 0 }}</span><span class="mk">今日 收/发</span>
-            </div>
-          </div>
-
-          <!-- 过程动画：控制命令执行中 -->
-          <div v-if="pendingMap[b.id]" class="rc-pending">
-            <el-icon class="rp-spin"><Loading /></el-icon>
-            <span class="rp-text">{{ pendingText(b) }}</span>
-            <span class="rp-dots"><i></i><i></i><i></i></span>
-          </div>
-
-          <div v-if="b.last_error && !pendingMap[b.id]" class="rc-err" :title="b.last_error">
-            <el-icon><WarningFilled /></el-icon><span>{{ b.last_error }}</span>
-          </div>
-
-          <!-- 转发管理员（内联编辑） -->
-          <div class="rc-fwd">
-            <div class="fwd-label">
-              <el-icon><Switch /></el-icon>
-              <span>转发管理员 · {{ (b.admins || []).length }}</span>
-            </div>
-            <div class="fwd-tags">
-              <el-tag v-for="a in (b.admins || [])" :key="a.admin_id" size="small"
-                      :type="a.admin_type === 'super' ? 'danger' : 'primary'"
-                      effect="light" closable class="fwd-tag"
-                      @close="removeTarget(b, a)">
-                <span class="fwd-id">{{ a.admin_id }}</span>
-                <span v-if="a.first_name"> · {{ a.first_name }}</span>
-              </el-tag>
-              <span v-if="!(b.admins || []).length" class="fwd-empty">暂未设置，消息不会转发</span>
-            </div>
-            <div class="fwd-add">
-              <el-input v-model.number="draftMap[b.id].id" size="small" placeholder="管理员 TG ID" />
-              <el-select v-model="draftMap[b.id].type" size="small" class="fwd-type">
-                <el-option value="normal" label="普通" />
-                <el-option value="super" label="超级" />
-              </el-select>
-              <el-button size="small" type="primary" plain @click="addTarget(b)">添加</el-button>
-            </div>
-          </div>
-
-          <!-- 操作区 -->
-          <div class="rc-actions">
-            <el-button size="small" :icon="View" @click="goDetail(b)">详情记录</el-button>
-            <el-button v-if="auth.has('bot:edit')" size="small" :icon="Edit" @click="openEdit(b)">编辑</el-button>
-            <el-button v-if="auth.has('bot:edit')" size="small" :icon="Key" @click="openToken(b)">Token</el-button>
-          </div>
-          <div class="rc-actions">
-            <el-button v-if="auth.has('bot:edit')" size="small" type="success" plain :icon="VideoPlay"
-                       :disabled="!!pendingMap[b.id]"
-                       @click="control(b, 'start')">启动</el-button>
-            <el-button v-if="auth.has('bot:edit')" size="small" type="warning" plain :icon="RefreshRight"
-                       :disabled="!!pendingMap[b.id]"
-                       @click="control(b, 'restart')">重启</el-button>
-            <el-button v-if="auth.has('bot:edit')" size="small" :icon="VideoPause"
-                       :disabled="!!pendingMap[b.id]"
-                       @click="control(b, 'stop')">停止</el-button>
-            <el-popconfirm v-if="auth.has('bot:delete')" title="确认删除该机器人及其转发配置？"
-                           @confirm="onDelete(b)">
-              <template #reference>
-                <el-button size="small" type="danger" plain :icon="Delete">删除</el-button>
-              </template>
-            </el-popconfirm>
+    <div class="card-grid" v-loading="loading">
+      <div v-for="b in bots" :key="b.id" class="rcard" :class="Number(b.is_running) ? 'is-up' : 'is-down'"
+           @click="goDetail(b)">
+        <!-- 悬浮过程层：不占布局，卡片尺寸不变 -->
+        <div v-if="pendingMap[b.id]" class="pending-overlay">
+          <div class="pending-box">
+            <el-icon class="p-spin"><Loading /></el-icon>
+            <span>{{ pendingText(b) }}</span>
           </div>
         </div>
-      </el-col>
 
-      <el-col :span="24" v-if="!loading && bots.length === 0">
+        <!-- 头部 -->
+        <div class="rc-head">
+          <div class="rc-ava">{{ b.bot_name.slice(0, 1).toUpperCase() }}</div>
+          <div class="rc-id">
+            <div class="rc-name">{{ b.bot_name }}</div>
+            <div class="rc-sub">{{ b.bot_username || '未设置显示名' }}</div>
+          </div>
+          <div class="rc-state">
+            <span class="state-dot" />
+            <span class="state-text">{{ Number(b.is_running) ? '运行中' : '已停止' }}</span>
+          </div>
+        </div>
+
+        <!-- 指标 -->
+        <div class="rc-metrics">
+          <div class="metric">
+            <span class="mv">{{ b.pid ?? '—' }}</span><span class="mk">PID</span>
+          </div>
+          <div class="metric">
+            <span class="mv">{{ uptime(b) }}</span><span class="mk">已运行</span>
+          </div>
+          <div class="metric">
+            <span class="mv">{{ b.captcha_available ?? 0 }}</span><span class="mk">验证码池</span>
+          </div>
+          <div class="metric">
+            <span class="mv">{{ b.today_in ?? 0 }}/{{ b.today_out ?? 0 }}</span><span class="mk">收/发</span>
+          </div>
+        </div>
+
+        <div v-if="b.last_error && !pendingMap[b.id]" class="rc-err" :title="b.last_error">
+          <el-icon><WarningFilled /></el-icon><span>{{ b.last_error }}</span>
+        </div>
+
+        <!-- 操作区（阻止冒泡，不触发进详情） -->
+        <div class="rc-actions" @click.stop>
+          <button v-if="Number(b.is_running)" class="pill warn" :disabled="!!pendingMap[b.id]"
+                  @click="control(b, 'restart')">
+            <el-icon><RefreshRight /></el-icon><span>重启</span>
+          </button>
+          <button v-if="!Number(b.is_running)" class="pill primary" :disabled="!!pendingMap[b.id]"
+                  @click="control(b, 'start')">
+            <el-icon><VideoPlay /></el-icon><span>启动</span>
+          </button>
+          <button v-if="Number(b.is_running)" class="pill ghost" :disabled="!!pendingMap[b.id]"
+                  @click="control(b, 'stop')">
+            <el-icon><VideoPause /></el-icon><span>停止</span>
+          </button>
+          <button class="pill neutral" @click="openForward(b)">
+            <el-icon><Switch /></el-icon><span>转发 · {{ b.admin_count ?? 0 }}</span>
+          </button>
+          <span class="actions-spacer" />
+          <el-icon v-if="auth.has('bot:edit')" class="icon-btn" title="编辑" @click="openEdit(b)"><Edit /></el-icon>
+          <el-icon v-if="auth.has('bot:edit')" class="icon-btn" title="Token" @click="openToken(b)"><Key /></el-icon>
+          <el-icon class="icon-btn" title="详情记录" @click="goDetail(b)"><View /></el-icon>
+          <el-icon v-if="auth.has('bot:delete')" class="icon-btn danger" title="删除" @click="onDelete(b)"><Delete /></el-icon>
+        </div>
+      </div>
+
+      <div v-if="!loading && bots.length === 0" class="empty-wrap">
         <el-empty description="还没有机器人，点击右上角「新增机器人」" />
-      </el-col>
-    </el-row>
+      </div>
+    </div>
 
     <!-- 编辑 / 新增 -->
     <el-dialog v-model="editVisible" :title="form.id ? '编辑机器人' : '新增机器人'" width="520px">
@@ -149,6 +124,32 @@
         <el-button type="primary" @click="saveToken">保存并校验</el-button>
       </template>
     </el-dialog>
+
+    <!-- 转发管理员设置 -->
+    <el-dialog v-model="fwdVisible" :title="`转发设置 · ${fwdBot?.bot_name || ''}`" width="560px">
+      <div class="fwd-tags">
+        <el-tag v-for="a in fwdAdmins" :key="a.admin_id" size="small"
+                :type="a.admin_type === 'super' ? 'danger' : 'primary'"
+                effect="light" closable class="fwd-tag" @close="removeTarget(a)">
+          <span class="fwd-id">{{ a.admin_id }}</span>
+          <span v-if="a.first_name"> · {{ a.first_name }}</span>
+          <span class="fwd-role">（{{ a.admin_type === 'super' ? '超级' : '普通' }}）</span>
+        </el-tag>
+        <span v-if="!fwdAdmins.length" class="fwd-empty">暂未设置，消息不会转发</span>
+      </div>
+      <el-divider />
+      <div class="fwd-add">
+        <el-input v-model.number="fwdDraft.id" size="small" placeholder="管理员 TG ID" />
+        <el-select v-model="fwdDraft.type" size="small" class="fwd-type">
+          <el-option value="normal" label="普通" />
+          <el-option value="super" label="超级" />
+        </el-select>
+        <el-button size="small" type="primary" @click="addTarget">添加</el-button>
+      </div>
+      <template #footer>
+        <el-button type="primary" @click="fwdVisible = false">完成</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -173,10 +174,8 @@ const loading = ref(false);
 const autoRefresh = ref(true);
 let timer = null;
 
-// 每张卡片的执行态：{ action, controlId, failTimer, pollTimer }
+// 每张卡片的执行态：{ action, controlId, failTimer, pollTimer, off }
 const pendingMap = reactive({});
-
-const draftMap = reactive({});
 
 const editVisible = ref(false);
 const form = reactive({ id: null, bot_name: '', api_key: '', bot_username: '', is_active: 1 });
@@ -185,6 +184,12 @@ const tokenVisible = ref(false);
 const newToken = ref('');
 let tokenBot = null;
 
+// 转发弹窗
+const fwdVisible = ref(false);
+const fwdBot = ref(null);
+const fwdAdmins = ref([]);
+const fwdDraft = reactive({ id: null, type: 'normal' });
+
 async function load() {
   loading.value = true;
   try {
@@ -192,12 +197,11 @@ async function load() {
       api.get('/bots'),
       api.get('/forward'),
     ]);
-    const fwdMap = new Map(fwdRows.map((f) => [Number(f.id), f.admins || []]));
-    bots.value = botRows.map((b) => {
-      const id = Number(b.id);
-      if (!draftMap[id]) draftMap[id] = { id: null, type: 'normal' };
-      return { ...b, admins: fwdMap.get(id) || [] };
-    });
+    const countMap = new Map(fwdRows.map((f) => [Number(f.id), (f.admins || []).length]));
+    bots.value = botRows.map((b) => ({
+      ...b,
+      admin_count: countMap.get(Number(b.id)) ?? 0,
+    }));
   } finally { loading.value = false; }
 }
 
@@ -255,20 +259,35 @@ async function saveToken() {
   }
 }
 
-async function addTarget(b) {
-  const d = draftMap[b.id];
-  if (!d.id) return ElMessage.warning('请输入管理员 TG ID');
+async function openForward(b) {
+  fwdBot.value = b;
+  fwdDraft.id = null; fwdDraft.type = 'normal';
+  fwdVisible.value = true;
+  await loadFwdAdmins();
+}
+
+async function loadFwdAdmins() {
+  if (!fwdBot.value) return;
+  const fwdRows = await api.get('/forward');
+  const cur = fwdRows.find((f) => Number(f.id) === Number(fwdBot.value.id));
+  fwdAdmins.value = cur ? cur.admins : [];
+}
+
+async function addTarget() {
+  if (!fwdDraft.id) return ElMessage.warning('请输入管理员 TG ID');
   await api.post('/forward/targets', {
-    bot_id: b.id, admin_id: d.id, admin_type: d.type,
+    bot_id: fwdBot.value.id, admin_id: fwdDraft.id, admin_type: fwdDraft.type,
   });
   ElMessage.success('已添加，机器人下次转发即生效');
-  d.id = null; d.type = 'normal';
+  fwdDraft.id = null; fwdDraft.type = 'normal';
+  await loadFwdAdmins();
   load();
 }
 
-async function removeTarget(b, a) {
-  await api.delete(`/forward/targets/${b.id}/${a.admin_id}`);
+async function removeTarget(a) {
+  await api.delete(`/forward/targets/${fwdBot.value.id}/${a.admin_id}`);
   ElMessage.success('已移除');
+  await loadFwdAdmins();
   load();
 }
 
@@ -289,23 +308,20 @@ function beginPending(b, action, controlId) {
 
   const settle = (ok, resultMsg) => finishPending(b.id, ok, resultMsg);
 
-  // 1) WS：等到匹配本 control_id 的 bot_lifecycle 帧
   entry.off = wsOn('bot_lifecycle', (data) => {
     if (Number(data.control_id) !== controlId) return;
     settle(data.state === 'done', data.result);
   });
 
-  // 2) 兜底：WS 未连/丢帧时，每 2s 查 control-last
   entry.pollTimer = setInterval(async () => {
     try {
       const last = await api.get(`/bots/${b.id}/control-last`);
       if (last && Number(last.id) === controlId && (last.status === 'done' || last.status === 'error')) {
         settle(last.status === 'done', last.result);
       }
-    } catch { /* noop，继续等 */ }
+    } catch { /* noop */ }
   }, 2000);
 
-  // 3) 总超时：30s 仍无结果，结束动画并提示
   entry.failTimer = setTimeout(() => settle(false, '执行超时，请刷新确认状态'), 30000);
 }
 
@@ -318,11 +334,8 @@ function finishPending(id, ok, resultMsg) {
   delete pendingMap[id];
 
   const verb = ACTION_TEXT[entry.action] || '操作';
-  if (ok) {
-    ElMessage.success(`${verb}成功`);
-  } else {
-    ElMessage.error(`${verb}失败：${resultMsg || '未知错误'}`);
-  }
+  if (ok) ElMessage.success(`${verb}成功`);
+  else ElMessage.error(`${verb}失败：${resultMsg || '未知错误'}`);
   load();
 }
 
@@ -332,6 +345,10 @@ function pendingText(b) {
 }
 
 async function onDelete(b) {
+  try {
+    const { ElMessageBox } = await import('element-plus');
+    await ElMessageBox.confirm('确认删除该机器人及其转发配置？', '确认', { type: 'warning' });
+  } catch { return; }
   await api.delete(`/bots/${b.id}`);
   ElMessage.success('已删除');
   load();
@@ -362,44 +379,53 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .bots-unified { padding: 20px 22px; }
-.page-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 18px; flex-wrap: wrap; }
+.page-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 20px; flex-wrap: wrap; }
 .page-h2 { margin: 0; font-size: 20px; font-weight: 700; color: #1f2733; }
 .page-desc { margin: 5px 0 0; font-size: 13px; color: #8a929e; }
 .page-tools { display: flex; gap: 10px; align-items: center; }
 
-.rcard {
-  background: #fff; border-radius: 14px; padding: 16px;
-  box-shadow: 0 2px 14px rgba(31, 45, 61, 0.07);
-  border: 1px solid #eef1f5; border-top: 3px solid #34c759;
-  transition: transform .15s ease, box-shadow .15s ease;
-}
-.rcard:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(31,45,61,.12); }
-.rcard.is-down { border-top-color: #c2c8d2; }
+.card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); gap: 16px; }
 
-.rc-head { display: flex; gap: 12px; align-items: center; margin-bottom: 14px; }
+.rcard {
+  position: relative;
+  background: #fff; border-radius: 16px; padding: 18px;
+  box-shadow: 0 2px 12px rgba(31, 45, 61, 0.06);
+  border: 1px solid #eef1f5;
+  cursor: pointer;
+  transition: transform .18s ease, box-shadow .18s ease;
+  display: flex; flex-direction: column;
+}
+.rcard::before {
+  content: ''; position: absolute; left: 0; top: 16px; bottom: 16px; width: 4px;
+  border-radius: 0 4px 4px 0; background: #34c759;
+}
+.rcard:hover { transform: translateY(-3px); box-shadow: 0 12px 28px rgba(31,45,61,.12); }
+.rcard.is-down::before { background: #c2c8d2; }
+
+.rc-head { display: flex; gap: 12px; align-items: center; margin-bottom: 16px; padding-left: 6px; }
 .rc-ava {
-  width: 44px; height: 44px; border-radius: 12px; flex-shrink: 0;
+  width: 46px; height: 46px; border-radius: 13px; flex-shrink: 0;
   background: linear-gradient(135deg, #4facfe, #2f8ff5);
-  color: #fff; font-size: 19px; font-weight: 700;
+  color: #fff; font-size: 20px; font-weight: 700;
   display: flex; align-items: center; justify-content: center;
 }
 .is-down .rc-ava { background: linear-gradient(135deg, #b6bdc9, #959caa); }
-.rc-name-row { display: flex; align-items: center; gap: 8px; }
+.rc-id { flex: 1; min-width: 0; }
 .rc-name { font-size: 16px; font-weight: 700; color: #1f2733; }
-.rc-badge {
-  font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 20px;
-  background: #e6f9ee; color: #1ba94c;
-}
-.is-down .rc-badge { background: #eef1f5; color: #8a929e; }
-.rc-sub { font-size: 12px; color: #98a0ac; margin-top: 3px; }
+.rc-sub { font-size: 12px; color: #98a0ac; margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rc-state { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.state-dot { width: 8px; height: 8px; border-radius: 50%; background: #34c759; box-shadow: 0 0 0 3px rgba(52,199,89,.18); }
+.is-down .state-dot { background: #c2c8d2; box-shadow: 0 0 0 3px rgba(194,200,210,.2); }
+.state-text { font-size: 12px; font-weight: 600; color: #1ba94c; }
+.is-down .state-text { color: #98a0ac; }
 
-.rc-metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 12px; }
-.m {
-  background: #f7f9fc; border-radius: 10px; padding: 8px 6px;
-  display: flex; flex-direction: column; align-items: center; gap: 2px;
+.rc-metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 14px; }
+.metric {
+  background: #f7f9fc; border-radius: 10px; padding: 9px 4px;
+  display: flex; flex-direction: column; align-items: center; gap: 3px;
 }
 .mv { font-size: 14px; font-weight: 700; color: #2b333f; }
-.mk { font-size: 11px; color: #9aa2ae; }
+.mk { font-size: 10px; color: #9aa2ae; }
 
 .rc-err {
   display: flex; gap: 6px; align-items: center; font-size: 12px;
@@ -408,40 +434,56 @@ onBeforeUnmount(() => {
 }
 .rc-err span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-/* 过程动画 */
-.rc-pending {
-  display: flex; align-items: center; gap: 8px;
-  background: #f2f7ff; border: 1px solid #d6e6ff; border-radius: 8px;
-  padding: 8px 10px; margin-bottom: 12px; color: #2f6fed; font-size: 13px;
-}
-.rp-spin { font-size: 15px; animation: rp-rotate 1s linear infinite; }
-.rp-text { font-weight: 600; }
-.rp-dots { display: inline-flex; gap: 3px; }
-.rp-dots i {
-  width: 4px; height: 4px; border-radius: 50%;
-  background: #2f6fed; opacity: .4;
-  animation: rp-bounce 1.2s infinite ease-in-out;
-}
-.rp-dots i:nth-child(2) { animation-delay: .2s; }
-.rp-dots i:nth-child(3) { animation-delay: .4s; }
-@keyframes rp-rotate { to { transform: rotate(360deg); } }
-@keyframes rp-bounce {
-  0%, 80%, 100% { opacity: .3; transform: translateY(0); }
-  40% { opacity: 1; transform: translateY(-3px); }
-}
+.rc-actions { display: flex; align-items: center; gap: 6px; margin-top: auto; padding-top: 4px; }
+.actions-spacer { flex: 1; }
 
-.rc-fwd {
-  background: #fafbfd; border: 1px solid #eef1f5; border-radius: 10px;
-  padding: 10px 12px; margin-bottom: 12px;
+.pill {
+  display: inline-flex; align-items: center; gap: 5px;
+  height: 30px; padding: 0 12px; border: none; border-radius: 15px;
+  font-size: 12px; font-weight: 600; cursor: pointer;
+  transition: filter .15s ease, opacity .15s ease;
 }
-.fwd-label { display: flex; gap: 6px; align-items: center; font-size: 12px; font-weight: 600; color: #58606e; margin-bottom: 8px; }
-.fwd-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 9px; min-height: 20px; }
+.pill .el-icon { font-size: 13px; }
+.pill:disabled { opacity: .5; cursor: not-allowed; }
+.pill:not(:disabled):hover { filter: brightness(1.05); }
+.pill.primary { background: #e6f9ee; color: #1ba94c; }
+.pill.warn { background: #fff4e5; color: #e68a1a; }
+.pill.ghost { background: #f2f4f7; color: #6b7280; }
+.pill.neutral { background: #eef3ff; color: #3b6fe0; }
+
+.icon-btn {
+  font-size: 16px; color: #a6adb8; cursor: pointer; padding: 4px;
+  border-radius: 6px; transition: color .15s, background .15s;
+}
+.icon-btn:hover { color: #3b6fe0; background: #f2f6ff; }
+.icon-btn.danger:hover { color: #f56c6c; background: #fef0f0; }
+
+/* 悬浮过程层 */
+.pending-overlay {
+  position: absolute; inset: 0; z-index: 5;
+  background: rgba(255, 255, 255, 0.72);
+  backdrop-filter: blur(2px);
+  border-radius: 16px;
+  display: flex; align-items: center; justify-content: center;
+}
+.pending-box {
+  display: inline-flex; align-items: center; gap: 8px;
+  background: #fff; border-radius: 20px; padding: 9px 18px;
+  box-shadow: 0 6px 20px rgba(31,45,61,.16);
+  font-size: 13px; font-weight: 600; color: #2f6fed;
+}
+.p-spin { font-size: 16px; animation: p-rotate 1s linear infinite; }
+@keyframes p-rotate { to { transform: rotate(360deg); } }
+
+.empty-wrap { grid-column: 1 / -1; padding: 60px 0; }
+
+.masked { font-family: monospace; color: #909399; }
+
+.fwd-tags { display: flex; flex-wrap: wrap; gap: 8px; min-height: 24px; }
 .fwd-tag { margin: 0; }
 .fwd-id { font-variant-numeric: tabular-nums; }
-.fwd-empty { font-size: 12px; color: #a6adb8; }
-.fwd-add { display: flex; gap: 6px; }
-.fwd-type { width: 78px; flex-shrink: 0; }
-
-.rc-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
-.masked { font-family: monospace; color: #909399; }
+.fwd-role { font-size: 11px; }
+.fwd-empty { font-size: 13px; color: #a6adb8; }
+.fwd-add { display: flex; gap: 8px; }
+.fwd-type { width: 90px; flex-shrink: 0; }
 </style>

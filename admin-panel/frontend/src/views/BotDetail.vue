@@ -8,9 +8,14 @@
       </el-tag>
       <span class="sub">{{ bot.bot_username }}</span>
       <div class="spacer" />
-      <el-button size="small" type="success" @click="control('start')">启动</el-button>
-      <el-button size="small" type="warning" @click="control('restart')">重启</el-button>
-      <el-button size="small" type="info" @click="control('stop')">停止</el-button>
+      <template @click.stop>
+        <el-button v-if="!Number(bot.is_running)" size="small" type="success"
+                   :loading="!!busy" @click="control('start')">启动</el-button>
+        <el-button v-if="Number(bot.is_running)" size="small" type="warning"
+                   :loading="!!busy" @click="control('restart')">重启</el-button>
+        <el-button v-if="Number(bot.is_running)" size="small" type="info"
+                   :loading="!!busy" @click="control('stop')">停止</el-button>
+      </template>
     </div>
 
     <el-card style="margin-top: 12px">
@@ -84,25 +89,11 @@
           </el-table>
         </el-tab-pane>
 
-        <!-- 历史聊天 -->
-        <el-tab-pane label="历史聊天" name="chat">
-          <el-alert type="info" :closable="false" style="margin-bottom: 10px"
-            title="该机器人下的全部会话，点任意会话进入完整聊天记录。" />
-          <el-table :data="conversations" stripe size="small" @row-click="openChat">
-            <el-table-column label="用户" min-width="200">
-              <template #default="{ row }">
-                <div class="user-cell">
-                  <el-avatar :size="32" :src="row.avatar_url">
-                    {{ (row.first_name || row.user_id).toString().slice(0,1) }}
-                  </el-avatar>
-                  <div>
-                    <div>{{ row.first_name || row.username || row.user_id }}</div>
-                    <div class="muted">{{ row.msg_count }} 条 · {{ row.last_at }}</div>
-                  </div>
-                </div>
-              </template>
-            </el-table-column>
-          </el-table>
+        <!-- 历史聊天（沿用历史消息页风格） -->
+        <el-tab-pane label="历史聊天" name="chat" lazy>
+          <div class="chat-console-wrap">
+            <ChatConsole :fixed-bot="botId" />
+          </div>
         </el-tab-pane>
       </el-tabs>
     </el-card>
@@ -110,11 +101,13 @@
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue';
+import { computed, onMounted, onBeforeUnmount, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { ArrowLeft } from '@element-plus/icons-vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import api from '../api';
+import { on as wsOn } from '../ws';
+import ChatConsole from '../components/ChatConsole.vue';
 
 const route = useRoute();
 const router = useRouter();
@@ -129,7 +122,10 @@ const newId = ref(null);
 const newType = ref('normal');
 
 const records = ref([]);
-const conversations = ref([]);
+
+// 头部进程控制的执行态
+const busy = ref(null);
+let busyOff = null;
 
 const uptime = computed(() => {
   if (!Number(bot.value.is_running) || !bot.value.started_at) return '-';
@@ -170,10 +166,6 @@ async function loadRecords() {
   records.value = await api.get('/forward/records', { params: { bot_id: botId } });
 }
 
-async function loadConversations() {
-  conversations.value = await api.get('/messages/conversations', { params: { bot_id: botId } });
-}
-
 function nameOf(row) {
   return [row.first_name, row.last_name].filter(Boolean).join(' ') || row.username || row.user_id;
 }
@@ -182,23 +174,28 @@ function mediaUrl(fileId, type) {
   return `/server/api/media/${botId}?file_id=${fileId}` + (type ? `&type=${type}` : '');
 }
 
-function openChat(row) {
-  router.push({ path: '/messages', query: { bot_id: botId, user_id: row.user_id } });
-}
-
 async function control(action) {
+  if (busy.value) return;
   try {
     await ElMessageBox.confirm(`确认对 ${bot.value.bot_name} 执行「${ {start:'启动',stop:'停止',restart:'重启'}[action] }」？`, '确认', { type: 'warning' });
   } catch { return; }
-  await api.post(`/bots/${botId}/control`, { action });
-  ElMessage.success('命令已下发');
-  setTimeout(loadBot, 1800);
+  const res = await api.post(`/bots/${botId}/control`, { action });
+  const controlId = Number(res.control_id);
+  busy.value = { action, controlId };
+  busyOff = wsOn('bot_lifecycle', (data) => {
+    if (Number(data.control_id) !== controlId) return;
+    const ok = data.state === 'done';
+    busy.value = null; busyOff?.(); busyOff = null;
+    ElMessage[ok ? 'success' : 'error'](
+      ok ? `${ {start:'启动',stop:'停止',restart:'重启'}[action] }成功`
+         : `${ {start:'启动',stop:'停止',restart:'重启'}[action] }失败：${data.result || ''}`);
+    loadBot();
+  });
 }
 
 async function onTab(name) {
   if (name === 'admins') loadAdmins();
   if (name === 'records') loadRecords();
-  if (name === 'chat') loadConversations();
 }
 
 onMounted(async () => {
@@ -208,6 +205,7 @@ onMounted(async () => {
     await onTab(tab.value);
   } finally { loading.value = false; }
 });
+onBeforeUnmount(() => { busyOff?.(); });
 </script>
 
 <style scoped>
@@ -221,4 +219,12 @@ onMounted(async () => {
 .user-cell { display: flex; gap: 8px; align-items: center; }
 .thumb { width: 40px; height: 40px; border-radius: 5px; }
 .role { font-size: 11px; }
+
+.chat-console-wrap {
+  height: calc(100vh - 235px);
+  min-height: 460px;
+  border: 1px solid #e8e8e8;
+  border-radius: 10px;
+  overflow: hidden;
+}
 </style>
