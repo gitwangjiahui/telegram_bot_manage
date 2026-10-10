@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia';
 import api from '../api';
+import { startWs, stopWs } from '../ws';
 
 export const useAuthStore = defineStore('auth', {
   state: () => ({
@@ -16,6 +17,7 @@ export const useAuthStore = defineStore('auth', {
       this.token = token;
       localStorage.setItem('token', token);
       await this.fetchMe();
+      startWs();
     },
     async fetchMe() {
       this.me = await api.get('/me');
@@ -24,6 +26,7 @@ export const useAuthStore = defineStore('auth', {
       this.token = '';
       this.me = null;
       localStorage.removeItem('token');
+      stopWs();
     },
   },
 });

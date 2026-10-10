@@ -105,11 +105,12 @@ router.post('/:id/control', requirePerm('bot:edit'), async (req, res, next) => {
     const bot = await one('SELECT id FROM bots WHERE id = ?', [req.params.id]);
     if (!bot) return res.status(404).json({ message: '机器人不存在' });
 
-    await query(
+    const result = await query(
       `INSERT INTO bot_control (bot_id, action, requested_by) VALUES (?, ?, ?)`,
       [bot.id, action, req.user?.id ?? null]
     );
-    res.json({ ok: true, message: '命令已下发，约 1~2 秒生效' });
+    // 返回 control_id，前端据此匹配 WS bot_lifecycle 帧，精确结束过程动画
+    res.json({ ok: true, control_id: result.insertId, message: '命令已下发，约 1~2 秒生效' });
   } catch (e) { next(e); }
 });
 
@@ -117,7 +118,7 @@ router.post('/:id/control', requirePerm('bot:edit'), async (req, res, next) => {
 router.get('/:id/control-last', requirePerm('bot:view'), async (req, res, next) => {
   try {
     const row = await one(
-      `SELECT action, status, result, created_at, executed_at
+      `SELECT id, action, status, result, created_at, executed_at
          FROM bot_control WHERE bot_id = ? ORDER BY id DESC LIMIT 1`,
       [req.params.id]
     );

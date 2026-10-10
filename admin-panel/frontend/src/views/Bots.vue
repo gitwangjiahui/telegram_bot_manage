@@ -44,7 +44,14 @@
             </div>
           </div>
 
-          <div v-if="b.last_error" class="rc-err" :title="b.last_error">
+          <!-- 过程动画：控制命令执行中 -->
+          <div v-if="pendingMap[b.id]" class="rc-pending">
+            <el-icon class="rp-spin"><Loading /></el-icon>
+            <span class="rp-text">{{ pendingText(b) }}</span>
+            <span class="rp-dots"><i></i><i></i><i></i></span>
+          </div>
+
+          <div v-if="b.last_error && !pendingMap[b.id]" class="rc-err" :title="b.last_error">
             <el-icon><WarningFilled /></el-icon><span>{{ b.last_error }}</span>
           </div>
 
@@ -82,10 +89,13 @@
           </div>
           <div class="rc-actions">
             <el-button v-if="auth.has('bot:edit')" size="small" type="success" plain :icon="VideoPlay"
+                       :disabled="!!pendingMap[b.id]"
                        @click="control(b, 'start')">启动</el-button>
             <el-button v-if="auth.has('bot:edit')" size="small" type="warning" plain :icon="RefreshRight"
+                       :disabled="!!pendingMap[b.id]"
                        @click="control(b, 'restart')">重启</el-button>
             <el-button v-if="auth.has('bot:edit')" size="small" :icon="VideoPause"
+                       :disabled="!!pendingMap[b.id]"
                        @click="control(b, 'stop')">停止</el-button>
             <el-popconfirm v-if="auth.has('bot:delete')" title="确认删除该机器人及其转发配置？"
                            @confirm="onDelete(b)">
@@ -147,11 +157,14 @@ import { onMounted, onBeforeUnmount, reactive, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import {
   Plus, Refresh, Edit, Key, View, Delete, Switch,
-  VideoPlay, VideoPause, RefreshRight, WarningFilled,
+  VideoPlay, VideoPause, RefreshRight, WarningFilled, Loading,
 } from '@element-plus/icons-vue';
 import { ElMessage } from 'element-plus';
 import api from '../api';
 import { useAuthStore } from '../stores/auth';
+import { on as wsOn } from '../ws';
+
+const ACTION_TEXT = { start: '启动', stop: '停止', restart: '重启' };
 
 const auth = useAuthStore();
 const router = useRouter();
@@ -159,6 +172,9 @@ const bots = ref([]);
 const loading = ref(false);
 const autoRefresh = ref(true);
 let timer = null;
+
+// 每张卡片的执行态：{ action, controlId, failTimer, pollTimer }
+const pendingMap = reactive({});
 
 const draftMap = reactive({});
 
@@ -257,9 +273,62 @@ async function removeTarget(b, a) {
 }
 
 async function control(b, action) {
-  await api.post(`/bots/${b.id}/control`, { action });
-  ElMessage.success(`${{ start: '启动', stop: '停止', restart: '重启' }[action]}命令已下发`);
-  setTimeout(load, 1800);
+  if (pendingMap[b.id]) return;
+  try {
+    const res = await api.post(`/bots/${b.id}/control`, { action });
+    const controlId = Number(res.control_id);
+    beginPending(b, action, controlId);
+  } catch (e) {
+    ElMessage.error('命令下发失败：' + (e.message || ''));
+  }
+}
+
+function beginPending(b, action, controlId) {
+  const entry = { action, controlId };
+  pendingMap[b.id] = entry;
+
+  const settle = (ok, resultMsg) => finishPending(b.id, ok, resultMsg);
+
+  // 1) WS：等到匹配本 control_id 的 bot_lifecycle 帧
+  entry.off = wsOn('bot_lifecycle', (data) => {
+    if (Number(data.control_id) !== controlId) return;
+    settle(data.state === 'done', data.result);
+  });
+
+  // 2) 兜底：WS 未连/丢帧时，每 2s 查 control-last
+  entry.pollTimer = setInterval(async () => {
+    try {
+      const last = await api.get(`/bots/${b.id}/control-last`);
+      if (last && Number(last.id) === controlId && (last.status === 'done' || last.status === 'error')) {
+        settle(last.status === 'done', last.result);
+      }
+    } catch { /* noop，继续等 */ }
+  }, 2000);
+
+  // 3) 总超时：30s 仍无结果，结束动画并提示
+  entry.failTimer = setTimeout(() => settle(false, '执行超时，请刷新确认状态'), 30000);
+}
+
+function finishPending(id, ok, resultMsg) {
+  const entry = pendingMap[id];
+  if (!entry) return;
+  clearTimeout(entry.failTimer);
+  clearInterval(entry.pollTimer);
+  entry.off?.();
+  delete pendingMap[id];
+
+  const verb = ACTION_TEXT[entry.action] || '操作';
+  if (ok) {
+    ElMessage.success(`${verb}成功`);
+  } else {
+    ElMessage.error(`${verb}失败：${resultMsg || '未知错误'}`);
+  }
+  load();
+}
+
+function pendingText(b) {
+  const e = pendingMap[b.id];
+  return e ? `${ACTION_TEXT[e.action] || '操作'}中` : '';
 }
 
 async function onDelete(b) {
@@ -280,7 +349,15 @@ onMounted(() => {
   load();
   timer = setInterval(() => autoRefresh.value && load(), 10000);
 });
-onBeforeUnmount(() => clearInterval(timer));
+onBeforeUnmount(() => {
+  clearInterval(timer);
+  Object.keys(pendingMap).forEach((id) => {
+    const e = pendingMap[id];
+    clearTimeout(e.failTimer);
+    clearInterval(e.pollTimer);
+    e.off?.();
+  });
+});
 </script>
 
 <style scoped>
@@ -330,6 +407,28 @@ onBeforeUnmount(() => clearInterval(timer));
   padding: 6px 9px; margin-bottom: 12px;
 }
 .rc-err span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* 过程动画 */
+.rc-pending {
+  display: flex; align-items: center; gap: 8px;
+  background: #f2f7ff; border: 1px solid #d6e6ff; border-radius: 8px;
+  padding: 8px 10px; margin-bottom: 12px; color: #2f6fed; font-size: 13px;
+}
+.rp-spin { font-size: 15px; animation: rp-rotate 1s linear infinite; }
+.rp-text { font-weight: 600; }
+.rp-dots { display: inline-flex; gap: 3px; }
+.rp-dots i {
+  width: 4px; height: 4px; border-radius: 50%;
+  background: #2f6fed; opacity: .4;
+  animation: rp-bounce 1.2s infinite ease-in-out;
+}
+.rp-dots i:nth-child(2) { animation-delay: .2s; }
+.rp-dots i:nth-child(3) { animation-delay: .4s; }
+@keyframes rp-rotate { to { transform: rotate(360deg); } }
+@keyframes rp-bounce {
+  0%, 80%, 100% { opacity: .3; transform: translateY(0); }
+  40% { opacity: 1; transform: translateY(-3px); }
+}
 
 .rc-fwd {
   background: #fafbfd; border: 1px solid #eef1f5; border-radius: 10px;
