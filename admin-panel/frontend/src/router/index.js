@@ -9,6 +9,7 @@ const routes = [
     children: [
       { path: 'dashboard', name: '仪表盘', component: () => import('../views/Dashboard.vue'), meta: { perm: 'dashboard:view' } },
       { path: 'bots', name: '机器人管理', component: () => import('../views/Bots.vue'), meta: { perm: 'bot:view' } },
+      { path: 'bots/:id', name: '机器人详情', component: () => import('../views/BotDetail.vue'), meta: { perm: 'bot:view' } },
       { path: 'users', name: '用户管理', component: () => import('../views/Users.vue'), meta: { perm: 'user:view' } },
       { path: 'admins', name: 'TG管理员', component: () => import('../views/Admins.vue'), meta: { perm: 'user:admin:manage' } },
       { path: 'forward', name: '转发设置', component: () => import('../views/Forward.vue'), meta: { perm: 'forward:view' } },

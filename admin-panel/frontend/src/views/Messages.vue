@@ -99,10 +99,13 @@
 
 <script setup>
 import { onMounted, ref } from 'vue';
+import { useRoute } from 'vue-router';
 import { Search, Refresh, Promotion } from '@element-plus/icons-vue';
 import { ElMessage } from 'element-plus';
 import api from '../api';
 import MediaContent from '../components/MediaContent.vue';
+
+const route = useRoute();
 
 const bots = ref([]);
 const botFilter = ref(null);
@@ -206,6 +209,14 @@ function formatDay(t) {
 onMounted(async () => {
   bots.value = await api.get('/bots');
   await loadConversations();
+  // 支持从机器人详情跳转：自动打开指定会话
+  const qid = Number(route.query.user_id);
+  const qbot = Number(route.query.bot_id);
+  if (qid && qbot) {
+    const c = conversations.value.find(
+      (x) => Number(x.user_id) === qid && Number(x.bot_id) === qbot);
+    if (c) selectConv(c);
+  }
 });
 </script>
 

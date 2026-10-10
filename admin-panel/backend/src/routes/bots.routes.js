@@ -11,9 +11,16 @@ router.get('/', requirePerm('bot:view'), async (req, res, next) => {
     const scope = botScopeFilter(req.ctx, 'b');
     const rows = await query(
       `SELECT b.id, b.bot_name, b.bot_username, b.is_active, b.created_at,
+              hb.pid, hb.started_at, hb.heartbeat_at, hb.captcha_available,
+              hb.today_in, hb.today_out, hb.last_error,
+              CASE WHEN hb.heartbeat_at >= DATE_SUB(NOW(), INTERVAL 90 SECOND)
+                   THEN 1 ELSE 0 END AS is_running,
               (SELECT COUNT(DISTINCT uv.user_id) FROM user_verification uv
-                WHERE uv.bot_name = b.bot_name) AS user_count
-         FROM bots b WHERE ${scope.where} ORDER BY b.id`,
+                WHERE uv.bot_name = b.bot_name) AS user_count,
+              (SELECT COUNT(*) FROM bot_admin_rela r WHERE r.bot_id = b.id) AS admin_count
+         FROM bots b
+         LEFT JOIN bot_heartbeat hb ON hb.bot_name = b.bot_name
+        WHERE ${scope.where} ORDER BY b.id`,
       scope.params
     );
     res.json(rows);
@@ -86,6 +93,36 @@ router.post('/:id/check', requirePerm('bot:edit'), async (req, res, next) => {
   } catch (e) {
     res.status(400).json({ ok: false, message: e.tg?.description || e.message });
   }
+});
+
+// 进程控制（start/stop/restart）：写入 bot_control 队列，由宿主 control_worker.php 执行
+router.post('/:id/control', requirePerm('bot:edit'), async (req, res, next) => {
+  try {
+    const action = String(req.body?.action || '');
+    if (!['start', 'stop', 'restart'].includes(action)) {
+      return res.status(400).json({ message: 'action 必须是 start/stop/restart' });
+    }
+    const bot = await one('SELECT id FROM bots WHERE id = ?', [req.params.id]);
+    if (!bot) return res.status(404).json({ message: '机器人不存在' });
+
+    await query(
+      `INSERT INTO bot_control (bot_id, action, requested_by) VALUES (?, ?, ?)`,
+      [bot.id, action, req.user?.id ?? null]
+    );
+    res.json({ ok: true, message: '命令已下发，约 1~2 秒生效' });
+  } catch (e) { next(e); }
+});
+
+// 最近一次控制结果（前端轮询确认执行结果）
+router.get('/:id/control-last', requirePerm('bot:view'), async (req, res, next) => {
+  try {
+    const row = await one(
+      `SELECT action, status, result, created_at, executed_at
+         FROM bot_control WHERE bot_id = ? ORDER BY id DESC LIMIT 1`,
+      [req.params.id]
+    );
+    res.json(row || null);
+  } catch (e) { next(e); }
 });
 
 export default router;
