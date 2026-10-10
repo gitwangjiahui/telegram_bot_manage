@@ -3,6 +3,10 @@
     <!-- 左侧会话列表 -->
     <div class="conv-panel">
       <div class="conv-header">
+        <el-select v-model="botFilter" placeholder="全部机器人" clearable size="small"
+                   style="width: 100%; margin-bottom: 8px" @change="loadConversations">
+          <el-option v-for="b in bots" :key="b.id" :label="b.bot_name" :value="b.id" />
+        </el-select>
         <el-input v-model="keyword" placeholder="搜索用户" :prefix-icon="Search" clearable
                   size="small" @input="debounceLoad" />
       </div>
@@ -46,8 +50,7 @@
       </div>
 
       <div class="msg-list" ref="msgListEl" v-loading="loadingMsg">
-        <div class="load-more" v-if="hasMore" @click="loadMore">↑ 加载更早消息</div>
-        <template v-for="(m, i) in messages" :key="m.id">
+        <template v-for="(m, i) in messages" :key="m.db_id || m.id">
           <div class="day-sep" v-if="showDaySep(i)">
             <span>{{ formatDay(m.created_at) }}</span>
           </div>
@@ -95,6 +98,8 @@ import { Search, Refresh, Promotion } from '@element-plus/icons-vue';
 import { ElMessage } from 'element-plus';
 import api from '../api';
 
+const bots = ref([]);
+const botFilter = ref(null);
 const conversations = ref([]);
 const current = ref(null);
 const messages = ref([]);
@@ -103,7 +108,6 @@ const loadingConv = ref(false);
 const loadingMsg = ref(false);
 const sending = ref(false);
 const draft = ref('');
-const hasMore = ref(false);
 const msgListEl = ref(null);
 let searchTimer = null;
 
@@ -121,7 +125,7 @@ async function loadConversations() {
   loadingConv.value = true;
   try {
     conversations.value = await api.get('/messages/conversations', {
-      params: { keyword: keyword.value },
+      params: { bot_id: botFilter.value || undefined, keyword: keyword.value },
     });
   } finally { loadingConv.value = false; }
 }
@@ -140,26 +144,11 @@ async function loadHistory() {
   if (!current.value) return;
   loadingMsg.value = true;
   try {
-    const PAGE = 50;
-    const rows = await api.get('/messages/history', {
-      params: { bot_id: current.value.bot_id, user_id: current.value.user_id, limit: PAGE },
+    messages.value = await api.get('/messages/history', {
+      params: { bot_id: current.value.bot_id, user_id: current.value.user_id },
     });
-    messages.value = rows;
-    hasMore.value = rows.length === PAGE;
     await scrollToBottom();
   } finally { loadingMsg.value = false; }
-}
-
-async function loadMore() {
-  const oldest = messages.value[0];
-  const rows = await api.get('/messages/history', {
-    params: {
-      bot_id: current.value.bot_id, user_id: current.value.user_id,
-      limit: 50, before_id: oldest.id,
-    },
-  });
-  messages.value = [...rows, ...messages.value];
-  hasMore.value = rows.length === 50;
 }
 
 async function sendReply() {
@@ -208,7 +197,10 @@ function formatDay(t) {
   return t.slice(0, 10);
 }
 
-onMounted(loadConversations);
+onMounted(async () => {
+  bots.value = await api.get('/bots');
+  await loadConversations();
+});
 </script>
 
 <style scoped>
