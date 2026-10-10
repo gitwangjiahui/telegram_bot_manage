@@ -28,7 +28,7 @@ type components struct {
 }
 
 // buildComponents loads the active bot config and constructs all components.
-func buildComponents(ctx context.Context, botName string, d Deps) (*components, error) {
+func buildComponents(ctx context.Context, botName, startedAt string, d Deps) (*components, error) {
 	bots := botsrepo.New(d.DB)
 	cfg, err := bots.GetActive(ctx, botName)
 	if err != nil {
@@ -77,7 +77,7 @@ func buildComponents(ctx context.Context, botName string, d Deps) (*components, 
 	poll := poller.New(cfg.ID, cfg.BotName, tg, d.Config, proc)
 
 	state := &reporter.State{}
-	rep := reporter.New(cfg.BotName, cfg.ID, "", d.DB, d.Config, captchaRepo, logRepo, state)
+	rep := reporter.New(cfg.BotName, cfg.ID, startedAt, d.DB, d.Config, captchaRepo, logRepo, state)
 
 	// Pool maintainer storage target: captcha_chat_id channel if configured,
 	// else super admin private chat with delete-after.

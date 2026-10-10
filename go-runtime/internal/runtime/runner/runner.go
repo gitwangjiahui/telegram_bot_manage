@@ -176,8 +176,9 @@ func markStopped(rep *reporter.Reporter) {
 // build loads config and constructs components, retrying until success or cancel.
 func (r *Runner) build(ctx context.Context) (*components, bool) {
 	fails := 0
+	startedAt := time.Now().Format("2006-01-02 15:04:05")
 	for ctx.Err() == nil {
-		comp, err := buildComponents(ctx, r.botName, r.deps)
+		comp, err := buildComponents(ctx, r.botName, startedAt, r.deps)
 		if err == nil && comp != nil {
 			return comp, true
 		}
