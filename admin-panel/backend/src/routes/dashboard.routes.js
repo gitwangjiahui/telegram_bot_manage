@@ -81,8 +81,8 @@ router.get('/trend', requirePerm('dashboard:view'), async (req, res, next) => {
            UNION ALL
            SELECT m.date, 'out'
              FROM message m
-             JOIN (SELECT DISTINCT bot_name,user_id,forwarded_msg_id FROM forward_map) f
-               ON f.user_id = m.chat_id AND f.forwarded_msg_id = m.reply_to_message
+             JOIN (SELECT DISTINCT bot_name,forwarded_msg_id FROM forward_map) f
+               ON f.forwarded_msg_id = m.reply_to_message
              JOIN bots b ON b.bot_name = f.bot_name
             WHERE ${scope.where}
          ) t
