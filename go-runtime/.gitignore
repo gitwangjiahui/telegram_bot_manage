@@ -1,0 +1,10 @@
+# 本地环境（含凭据，禁止入库）
+.env
+*.env.local
+
+# 编译产物
+/botd
+botd-*
+*.exe
+*.test
+out/

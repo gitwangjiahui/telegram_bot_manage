@@ -1,15 +1,16 @@
 # botd 服务片段：并入现有生产 docker compose（与 backend/frontend 同宿主、host 网络）
-# 镜像构建/推送复用现有 GitHub Actions 模式（新增 botd workflow），镜像名占位。
+# 镜像由 botd workflow 构建/推送，或本地 docker build 后 docker load。
 
 services:
   botd:
-    image: ghcr.io/<org>/botd:${BOTD_TAG:-latest}
+    image: ghcr.io/jh-tgbotmanage/botd:${BOTD_TAG:-latest}
     container_name: tg-botd
     restart: unless-stopped
     network_mode: host            # 127.0.0.1:3306(MySQL) / 127.0.0.1:9980(Clash) 直通
     env_file:
-      - .env                      # 见 .env.example；只含占位符于版本库
+      - .env                      # 见 .env.example；版本库只含占位符
     environment:
       TZ: Asia/Shanghai
+      BOTD_LISTEN: "127.0.0.1:19090"
     volumes:
       - ./logs/botd:/logs         # 可选；默认结构化日志走 stdout(docker logs)

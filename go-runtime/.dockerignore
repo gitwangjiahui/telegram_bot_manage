@@ -1,10 +1,11 @@
-# 构建上下文排除项（实现阶段使用）
+# Keep the build context minimal.
 .git
+.gitignore
 *.md
 docs
 deploy
 .env
 .env.*
-logs
-out
-*.test
+!.env.example
+/out
+botd

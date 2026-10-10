@@ -86,7 +86,7 @@ router.get('/trend', requirePerm('dashboard:view'), async (req, res, next) => {
              JOIN bots b ON b.bot_name = f.bot_name
             WHERE ${scope.where}
          ) t
-        WHERE t.created_at >= DATE_SUB(CURDATE(), INTERVAL 6 DAY)
+        WHERE t.created_at >= DATE_SUB(CURDATE(), INTERVAL 29 DAY)
         GROUP BY DATE(t.created_at) ORDER BY day`,
       [...scope.params, ...scope.params]
     );

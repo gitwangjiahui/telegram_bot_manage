@@ -56,16 +56,20 @@
       </el-table>
     </el-card>
 
-    <!-- 近 7 天消息趋势 -->
+    <!-- 近 30 天消息趋势 -->
     <el-card style="margin-top: 16px">
-      <template #header>近 7 天消息趋势</template>
+      <template #header>近 30 天消息趋势</template>
       <div class="bars">
         <div v-for="d in trend" :key="d.day" class="bar-col">
           <div class="bar-pair">
-            <div class="bar in" :style="{ height: barH(d.inbound) }" :title="`上行 ${d.inbound}`" />
-            <div class="bar out" :style="{ height: barH(d.outbound) }" :title="`回复 ${d.outbound}`" />
+            <el-tooltip :content="`${d.day} 上行 ${d.inbound}`" placement="top" :show-after="120" :hide-after="0">
+              <div class="bar in" :style="{ height: barH(d.inbound) }" />
+            </el-tooltip>
+            <el-tooltip :content="`${d.day} 回复 ${d.outbound}`" placement="top" :show-after="120" :hide-after="0">
+              <div class="bar out" :style="{ height: barH(d.outbound) }" />
+            </el-tooltip>
           </div>
-          <div class="bar-label">{{ d.day.slice(5) }}</div>
+          <div class="bar-label">{{ d.day.slice(8) }}</div>
         </div>
       </div>
       <div class="legend">
@@ -111,7 +115,16 @@ async function loadStatus() {
 }
 
 async function loadTrend() {
-  trend.value = await api.get('/dashboard/trend');
+  const rows = await api.get('/dashboard/trend');
+  const byDay = new Map(rows.map((r) => [r.day, r]));
+  const out = [];
+  const now = new Date();
+  for (let i = 29; i >= 0; i--) {
+    const d = new Date(now.getTime() - i * 86400000);
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    out.push(byDay.get(key) || { day: key, inbound: 0, outbound: 0 });
+  }
+  trend.value = out;
 }
 
 function loadAll() {
@@ -154,13 +167,13 @@ onUnmounted(() => timer && clearInterval(timer));
 .err { color: #F56C6C; font-size: 12px; }
 .ok-text { color: #c0c4cc; font-size: 12px; }
 
-.bars { display: flex; align-items: flex-end; gap: 18px; height: 160px; padding: 8px 4px; }
-.bar-col { display: flex; flex-direction: column; align-items: center; }
-.bar-pair { display: flex; align-items: flex-end; gap: 4px; height: 130px; }
-.bar { width: 22px; border-radius: 3px 3px 0 0; }
+.bars { display: flex; align-items: flex-end; gap: 6px; height: 160px; padding: 8px 4px; overflow-x: auto; }
+.bar-col { display: flex; flex-direction: column; align-items: center; flex: 0 0 auto; min-width: 26px; }
+.bar-pair { display: flex; align-items: flex-end; gap: 2px; height: 130px; }
+.bar { width: 10px; border-radius: 2px 2px 0 0; cursor: default; }
 .bar.in { background: linear-gradient(#42b883, #2f9e6c); }
 .bar.out { background: linear-gradient(#2aabee, #1f86c4); }
-.bar-label { margin-top: 6px; font-size: 12px; color: #909399; }
+.bar-label { margin-top: 6px; font-size: 11px; color: #909399; }
 .legend { display: flex; gap: 20px; font-size: 12px; color: #606266; margin-top: 4px; }
 .sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; }
 .sw.in { background: #2f9e6c; }
