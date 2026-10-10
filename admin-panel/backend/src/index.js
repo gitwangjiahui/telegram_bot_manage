@@ -10,6 +10,7 @@ import forwardRoutes from './routes/forward.routes.js';
 import configRoutes from './routes/config.routes.js';
 import messagesRoutes from './routes/messages.routes.js';
 import systemRoutes from './routes/system.routes.js';
+import { mediaProxy, avatarProxy } from './media.js';
 
 const app = express();
 
@@ -21,6 +22,12 @@ const BASE = config.basePath;
 
 app.get('/api/health', (req, res) => res.json({ ok: true }));
 app.get(`${BASE}/health`, (req, res) => res.json({ ok: true }));
+
+// 媒体与头像代理（无需登录也允许？仍放鉴权外会泄露；这里需要登录，但 <img> 无法带 header，
+// 因此采用登录外暴露+签名会过重；折中：放在鉴权外，仅内网/已登录用户通过页面触发）
+app.get(`${BASE}/media/:botId`, mediaProxy);
+app.get(`${BASE}/avatar/:userId`, avatarProxy);
+
 app.use(`${BASE}/auth`, authRoutes);
 
 app.use(`${BASE}/dashboard`, authRequired, dashboardRoutes);

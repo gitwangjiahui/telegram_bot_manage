@@ -23,13 +23,49 @@
       </el-row>
     </el-card>
 
-    <el-card style="margin-top: 16px" header="最近转发记录">
+    <el-card style="margin-top: 16px">
+      <template #header>
+        <div class="rec-header">
+          <span>最近转发记录（20 条）</span>
+          <el-radio-group v-model="botFilter" size="small" @change="loadRecords">
+            <el-radio-button :value="null">全部</el-radio-button>
+            <el-radio-button v-for="b in list" :key="b.id" :value="b.id">{{ b.bot_name }}</el-radio-button>
+          </el-radio-group>
+        </div>
+      </template>
+
       <el-table :data="records" stripe>
-        <el-table-column prop="bot_name" label="机器人" width="110" />
-        <el-table-column prop="user_id" label="用户 ID" width="140" />
-        <el-table-column prop="original_msg_id" label="原消息 ID" width="130" />
-        <el-table-column prop="forwarded_msg_id" label="转发消息 ID" width="130" />
-        <el-table-column prop="created_at" label="时间" />
+        <el-table-column label="用户" min-width="220">
+          <template #default="{ row }">
+            <div class="user-cell">
+              <el-avatar :size="38" :src="row.avatar_url">
+                {{ displayName(row).slice(0, 1) }}
+              </el-avatar>
+              <div class="user-meta">
+                <div class="user-name">{{ displayName(row) }}</div>
+                <div class="user-sub">
+                  <span>ID: {{ row.user_id }}</span>
+                  <span v-if="row.username">@{{ row.username }}</span>
+                </div>
+              </div>
+            </div>
+          </template>
+        </el-table-column>
+        <el-table-column prop="bot_name" label="机器人" width="90" />
+        <el-table-column label="消息内容" min-width="260">
+          <template #default="{ row }">
+            <div class="content-cell">
+              <el-image v-if="row.thumb_file_id" class="thumb"
+                :src="`/server/api/media/${row.bot_id}?file_id=${row.thumb_file_id}`"
+                :preview-src-list="[`/server/api/media/${row.bot_id}?file_id=${row.thumb_file_id}`]"
+                preview-teleported fit="cover" />
+              <el-tag v-if="row.msg_type && row.msg_type !== 'text'" size="small" type="info"
+                      style="margin-right: 6px">{{ typeNames[row.msg_type] || row.msg_type }}</el-tag>
+              <span class="content-text">{{ row.content || (row.msg_type === 'text' ? '' : '非文本消息') }}</span>
+            </div>
+          </template>
+        </el-table-column>
+        <el-table-column prop="created_at" label="转发时间" width="170" />
       </el-table>
     </el-card>
   </div>
@@ -43,11 +79,27 @@ import api from '../api';
 const list = ref([]);
 const records = ref([]);
 const newIdMap = reactive({});
+const botFilter = ref(null);
+
+const typeNames = {
+  photo: '图片', video: '视频', voice: '语音', document: '文件',
+  sticker: '贴纸', audio: '音乐', animation: '动图', video_note: '视频消息',
+};
+
+function displayName(row) {
+  return [row.first_name, row.last_name].filter(Boolean).join(' ')
+    || row.username || String(row.user_id);
+}
 
 async function load() {
   list.value = await api.get('/forward');
-  const r = await api.get('/forward/records', { params: { page: 1, page_size: 20 } });
-  records.value = r.list;
+  await loadRecords();
+}
+
+async function loadRecords() {
+  records.value = await api.get('/forward/records', {
+    params: botFilter.value ? { bot_id: botFilter.value } : {},
+  });
 }
 
 async function addTarget(botId) {
@@ -70,4 +122,15 @@ onMounted(load);
 
 <style scoped>
 .empty { color: #909399; font-size: 13px; margin-bottom: 8px; }
+.rec-header { display: flex; justify-content: space-between; align-items: center; }
+.user-cell { display: flex; align-items: center; gap: 10px; }
+.user-name { font-weight: 600; font-size: 14px; color: #303133; }
+.user-sub { font-size: 12px; color: #909399; display: flex; gap: 10px; margin-top: 2px; }
+.content-cell { display: flex; align-items: center; gap: 8px; }
+.thumb { width: 46px; height: 46px; border-radius: 6px; flex-shrink: 0; }
+.content-text {
+  color: #303133; font-size: 13px;
+  overflow: hidden; text-overflow: ellipsis;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+}
 </style>

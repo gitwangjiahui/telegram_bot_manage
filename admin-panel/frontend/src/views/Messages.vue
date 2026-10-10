@@ -14,7 +14,7 @@
         <div v-for="c in conversations" :key="`${c.bot_id}-${c.user_id}`"
              class="conv-item" :class="{ active: isActive(c) }"
              @click="selectConv(c)">
-          <el-avatar :size="42" :style="{ background: avatarColor(c.user_id) }">
+          <el-avatar :size="42" :src="c.avatar_url">
             {{ (c.first_name || c.username || c.user_id).toString().slice(0, 1).toUpperCase() }}
           </el-avatar>
           <div class="conv-info">
@@ -36,7 +36,7 @@
     <!-- 右侧聊天框 -->
     <div class="chat-panel" v-if="current">
       <div class="chat-header">
-        <el-avatar :size="40" :style="{ background: avatarColor(current.user_id) }">
+        <el-avatar :size="40" :src="current.avatar_url">
           {{ (current.first_name || current.username || current.user_id).toString().slice(0,1).toUpperCase() }}
         </el-avatar>
         <div>
@@ -56,21 +56,26 @@
           </div>
           <!-- 用户消息（左侧） -->
           <div v-if="m.direction === 'in'" class="msg-row left">
-            <el-avatar :size="34" :style="{ background: avatarColor(m.user_id) }">
+            <el-avatar :size="34" :src="current.avatar_url">
               {{ (current.first_name || current.username || m.user_id).toString().slice(0,1).toUpperCase() }}
             </el-avatar>
             <div class="bubble user-bubble">
-              <div class="bubble-text">{{ m.text_content || '[非文本消息]' }}</div>
+              <MediaContent v-if="m.media" :media="m.media" />
+              <div v-if="m.text_content" class="bubble-text"
+                   :class="{ 'has-media': m.media }">{{ m.text_content }}</div>
+              <div v-if="!m.text_content && !m.media" class="bubble-text">[非文本消息]</div>
               <div class="bubble-time">{{ formatHM(m.created_at) }}</div>
             </div>
           </div>
           <!-- 管理员/后台回复（右侧） -->
           <div v-else class="msg-row right">
             <div class="bubble admin-bubble">
-              <div class="bubble-text">{{ m.text_content }}</div>
+              <MediaContent v-if="m.media" :media="m.media" />
+              <div v-if="m.text_content" class="bubble-text"
+                   :class="{ 'has-media': m.media }">{{ m.text_content }}</div>
               <div class="bubble-time">{{ formatHM(m.created_at) }}</div>
             </div>
-            <el-avatar :size="34" style="background: #2AABEE">
+            <el-avatar :size="34" :src="`/server/api/avatar/${m.sender_id}`">
               <el-icon><UserFilled /></el-icon>
             </el-avatar>
           </div>
@@ -97,6 +102,7 @@ import { onMounted, ref } from 'vue';
 import { Search, Refresh, Promotion } from '@element-plus/icons-vue';
 import { ElMessage } from 'element-plus';
 import api from '../api';
+import MediaContent from '../components/MediaContent.vue';
 
 const bots = ref([]);
 const botFilter = ref(null);
@@ -279,6 +285,7 @@ onMounted(async () => {
 }
 .user-bubble .bubble-text { background: #fff; color: #303133; border-top-left-radius: 4px; }
 .admin-bubble .bubble-text { background: #2AABEE; color: #fff; border-top-right-radius: 4px; }
+.bubble-text.has-media { margin-top: 8px; }
 .bubble-time {
   font-size: 11px; color: #909399;
   text-align: right; margin-top: 2px;
