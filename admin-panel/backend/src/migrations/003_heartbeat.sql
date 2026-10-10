@@ -12,4 +12,4 @@ CREATE TABLE IF NOT EXISTS bot_heartbeat (
     last_error TEXT,
     last_error_at TIMESTAMP NULL,
     INDEX idx_heartbeat (heartbeat_at)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
