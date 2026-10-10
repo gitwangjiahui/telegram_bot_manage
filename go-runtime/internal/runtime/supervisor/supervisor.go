@@ -33,6 +33,9 @@ type Supervisor struct {
 	runners map[string]*runner.Runner
 	// exitAt records when a runner last exited, for circuit-breaker cooldown.
 	exitAt map[string]time.Time
+	// manualStop records bots intentionally stopped via control API while
+	// bots.is_active stays 1; the reconciler must not auto-restart these.
+	manualStop map[string]bool
 }
 
 // New creates a Supervisor.
@@ -45,6 +48,7 @@ func New(deps runner.Deps, reconcileIntervalS, controlPollIntervalS int, botdOnl
 		controlPollInterval: time.Duration(controlPollIntervalS) * time.Second,
 		runners:             map[string]*runner.Runner{},
 		exitAt:              map[string]time.Time{},
+		manualStop:          map[string]bool{},
 	}
 	s.botdOnly = map[string]bool{}
 	for _, b := range botdOnly {
@@ -88,6 +92,7 @@ func (s *Supervisor) StartBot(ctx context.Context, name string) error {
 	}
 	r := runner.New(name, s.deps)
 	s.runners[name] = r
+	delete(s.manualStop, name)
 	s.mu.Unlock()
 
 	r.Start(ctx)
@@ -118,6 +123,7 @@ func (s *Supervisor) StopBot(ctx context.Context, name string) error {
 	r.Stop(ctx)
 	s.mu.Lock()
 	delete(s.runners, name)
+	s.manualStop[name] = true
 	s.mu.Unlock()
 	return nil
 }

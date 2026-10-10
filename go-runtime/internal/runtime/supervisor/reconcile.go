@@ -37,9 +37,15 @@ func (s *Supervisor) reconcileOnce(ctx context.Context) {
 		s.mu.Lock()
 		_, running := s.runners[b.BotName]
 		exitAt, hadExit := s.exitAt[b.BotName]
+		_, stoppedManually := s.manualStop[b.BotName]
 		s.mu.Unlock()
 
 		if b.IsActive && !running {
+			// Manually stopped via control API while is_active stays 1:
+			// do not auto-restart until an explicit start/restart.
+			if stoppedManually {
+				continue
+			}
 			// Respect circuit-breaker cooldown after a prior exit.
 			if hadExit && time.Since(exitAt) < circuitBreakerCooldown {
 				continue

@@ -28,13 +28,31 @@
         <div class="rc-head">
           <div class="rc-ava">{{ b.bot_name.slice(0, 1).toUpperCase() }}</div>
           <div class="rc-id">
-            <div class="rc-name">{{ b.bot_name }}</div>
+            <div class="rc-name-row">
+              <span class="rc-name">{{ b.bot_name }}</span>
+              <span class="rc-state">
+                <span class="state-dot" />
+                <span class="state-text">{{ Number(b.is_running) ? '运行中' : '已停止' }}</span>
+              </span>
+            </div>
             <div class="rc-sub">{{ b.bot_username || '未设置显示名' }}</div>
           </div>
-          <div class="rc-state">
-            <span class="state-dot" />
-            <span class="state-text">{{ Number(b.is_running) ? '运行中' : '已停止' }}</span>
-          </div>
+        </div>
+
+        <!-- 右上角图标操作（阻止冒泡） -->
+        <div class="rc-corner" @click.stop>
+          <el-tooltip v-if="auth.has('bot:edit')" content="编辑机器人" placement="top">
+            <span class="corner-btn" @click="openEdit(b)"><el-icon><Edit /></el-icon></span>
+          </el-tooltip>
+          <el-tooltip v-if="auth.has('bot:edit')" content="设置 Token" placement="top">
+            <span class="corner-btn" @click="openToken(b)"><el-icon><Key /></el-icon></span>
+          </el-tooltip>
+          <el-tooltip content="详情记录" placement="top">
+            <span class="corner-btn" @click="goDetail(b)"><el-icon><View /></el-icon></span>
+          </el-tooltip>
+          <el-tooltip v-if="auth.has('bot:delete')" content="删除机器人" placement="top">
+            <span class="corner-btn danger" @click="onDelete(b)"><el-icon><Delete /></el-icon></span>
+          </el-tooltip>
         </div>
 
         <!-- 指标 -->
@@ -74,11 +92,6 @@
           <button class="pill neutral" @click="openForward(b)">
             <el-icon><Switch /></el-icon><span>转发 · {{ b.admin_count ?? 0 }}</span>
           </button>
-          <span class="actions-spacer" />
-          <el-icon v-if="auth.has('bot:edit')" class="icon-btn" title="编辑" @click="openEdit(b)"><Edit /></el-icon>
-          <el-icon v-if="auth.has('bot:edit')" class="icon-btn" title="Token" @click="openToken(b)"><Key /></el-icon>
-          <el-icon class="icon-btn" title="详情记录" @click="goDetail(b)"><View /></el-icon>
-          <el-icon v-if="auth.has('bot:delete')" class="icon-btn danger" title="删除" @click="onDelete(b)"><Delete /></el-icon>
         </div>
       </div>
 
@@ -402,7 +415,7 @@ onBeforeUnmount(() => {
 .rcard:hover { transform: translateY(-3px); box-shadow: 0 12px 28px rgba(31,45,61,.12); }
 .rcard.is-down::before { background: #c2c8d2; }
 
-.rc-head { display: flex; gap: 12px; align-items: center; margin-bottom: 16px; padding-left: 6px; }
+.rc-head { display: flex; gap: 12px; align-items: center; margin-bottom: 16px; padding-right: 4px; }
 .rc-ava {
   width: 46px; height: 46px; border-radius: 13px; flex-shrink: 0;
   background: linear-gradient(135deg, #4facfe, #2f8ff5);
@@ -411,6 +424,7 @@ onBeforeUnmount(() => {
 }
 .is-down .rc-ava { background: linear-gradient(135deg, #b6bdc9, #959caa); }
 .rc-id { flex: 1; min-width: 0; }
+.rc-name-row { display: flex; align-items: center; gap: 10px; }
 .rc-name { font-size: 16px; font-weight: 700; color: #1f2733; }
 .rc-sub { font-size: 12px; color: #98a0ac; margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .rc-state { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
@@ -418,6 +432,25 @@ onBeforeUnmount(() => {
 .is-down .state-dot { background: #c2c8d2; box-shadow: 0 0 0 3px rgba(194,200,210,.2); }
 .state-text { font-size: 12px; font-weight: 600; color: #1ba94c; }
 .is-down .state-text { color: #98a0ac; }
+
+/* 右上角图标操作 */
+.rc-corner {
+  position: absolute; top: 12px; right: 12px; z-index: 4;
+  display: none; gap: 2px;
+}
+.rcard:hover .rc-corner { display: inline-flex; }
+.corner-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 26px; height: 26px; border-radius: 8px;
+  color: #9aa2ae; cursor: pointer;
+  transition: color .15s ease, background .15s ease, transform .15s ease;
+}
+.corner-btn .el-icon { font-size: 15px; }
+.corner-btn:hover {
+  color: #3b6fe0; background: #eef3ff;
+  transform: translateY(-1px) scale(1.08);
+}
+.corner-btn.danger:hover { color: #f56c6c; background: #fef0f0; }
 
 .rc-metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 14px; }
 .metric {
