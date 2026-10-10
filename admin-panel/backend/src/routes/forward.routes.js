@@ -30,6 +30,9 @@ router.post('/targets', requirePerm('forward:edit'), async (req, res, next) => {
   try {
     const { bot_id, admin_id, admin_type = 'normal' } = req.body || {};
     if (!bot_id || !admin_id) return res.status(400).json({ message: '参数缺失' });
+    if (admin_type === 'super') {
+      await query("DELETE FROM bot_admin_rela WHERE bot_id = ? AND admin_type = 'super'", [bot_id]);
+    }
     await query('INSERT INTO admins (id) VALUES (?) ON DUPLICATE KEY UPDATE id=id', [admin_id]);
     await query(
       `INSERT INTO bot_admin_rela (bot_id, admin_id, admin_type) VALUES (?, ?, ?)

@@ -122,32 +122,42 @@ export async function avatarProxy(req, res) {
     const botId = Number(req.query.bot_id) || null;
     if (!userId) return res.status(400).json({ message: '参数无效' });
 
-    // 选一个可用 bot token（优先指定，否则任意 active bot）
-    let bot;
-    if (botId) bot = await one('SELECT api_key FROM bots WHERE id = ?', [botId]);
-    if (!bot) bot = await one('SELECT api_key FROM bots WHERE is_active = 1 ORDER BY id LIMIT 1');
-    if (!bot) return res.status(404).json({ message: '无可用机器人' });
+    // 候选机器人：指定 bot > 该用户绑定的 bot > 全部 active bot
+    const candidates = [];
+    if (botId) {
+      const b = await one('SELECT api_key FROM bots WHERE id = ?', [botId]);
+      if (b) candidates.push(b);
+    }
+    candidates.push(...await query(
+      `SELECT b.api_key FROM bot_admin_rela r
+        JOIN bots b ON b.id = r.bot_id WHERE r.admin_id = ?`, [userId]));
+    candidates.push(...await query('SELECT api_key FROM bots WHERE is_active = 1 ORDER BY id LIMIT 3'));
+    const seen = new Set();
+    const botList = candidates.filter((b) => !seen.has(b.api_key) && seen.add(b.api_key));
+    if (!botList.length) return res.status(404).json({ message: '无可用机器人' });
 
     let fileId = avatarCache.get(userId);
     if (fileId === undefined) {
-      const r = await fetch(`${API}/bot${bot.api_key}/getUserProfilePhotos`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ user_id: userId, limit: 1 }),
-        dispatcher,
-      });
-      const data = await r.json();
-      if (data.ok && data.result.photos?.[0]?.length) {
-        const sizes = data.result.photos[0];
-        fileId = sizes[sizes.length - 1].file_id;
-      } else {
-        fileId = null;
+      fileId = null;
+      for (const bot of botList) {
+        const r = await fetch(`${API}/bot${bot.api_key}/getUserProfilePhotos`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ user_id: userId, limit: 1 }),
+          dispatcher,
+        });
+        const data = await r.json();
+        if (data.ok && data.result.photos?.[0]?.length) {
+          const sizes = data.result.photos[0];
+          fileId = sizes[sizes.length - 1].file_id;
+          break;
+        }
       }
       avatarCache.set(userId, fileId);
     }
     if (!fileId) return res.status(404).json({ message: '无头像' });
 
-    const { ext, body } = await downloadFile(bot.api_key, fileId);
+    const { ext, body } = await downloadFile(botList[0].api_key, fileId);
     res.setHeader('Content-Type', EXT_MIME[ext] || 'image/jpeg');
     res.setHeader('Cache-Control', 'private, max-age=86400');
     const { Readable } = await import('node:stream');

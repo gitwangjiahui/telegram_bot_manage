@@ -16,6 +16,10 @@
             <el-divider style="margin: 8px 0" />
             <div style="display: flex; gap: 8px">
               <el-input v-model.number="newIdMap[bot.id]" placeholder="接收人 TG ID" size="small" />
+              <el-select v-model="newTypeMap[bot.id]" size="small" style="width: 84px">
+                <el-option value="normal" label="普通" />
+                <el-option value="super" label="超级" />
+              </el-select>
               <el-button size="small" type="primary" @click="addTarget(bot.id)">添加</el-button>
             </div>
           </el-card>
@@ -79,6 +83,7 @@ import api from '../api';
 const list = ref([]);
 const records = ref([]);
 const newIdMap = reactive({});
+const newTypeMap = reactive({});
 const botFilter = ref(null);
 
 const typeNames = {
@@ -105,9 +110,12 @@ async function loadRecords() {
 async function addTarget(botId) {
   const adminId = newIdMap[botId];
   if (!adminId) return ElMessage.warning('请输入 TG ID');
-  await api.post('/forward/targets', { bot_id: botId, admin_id: adminId });
+  await api.post('/forward/targets', {
+    bot_id: botId, admin_id: adminId, admin_type: newTypeMap[botId] || 'normal',
+  });
   ElMessage.success('已添加，机器人下次转发即生效');
   newIdMap[botId] = null;
+  newTypeMap[botId] = 'normal';
   load();
 }
 
