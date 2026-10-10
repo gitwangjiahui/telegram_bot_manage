@@ -67,6 +67,14 @@ class GenericmessageCommand extends UserCommand
         return $user_id == $this->super_admin_id;
     }
 
+    /**
+     * 当前 bot token
+     */
+    private function getToken(): string
+    {
+        return (string) ($GLOBALS['bot_config']['api_key'] ?? '');
+    }
+
     public function execute(): ServerResponse
     {
         $this->log("execute() called");
@@ -169,21 +177,20 @@ class GenericmessageCommand extends UserCommand
                 }
             }
         } else {
-            $all_admins = array_merge([$this->super_admin_id], $this->admin_ids);
-            $all_admins = array_unique(array_filter($all_admins));
+            $all_admins = array_unique(array_filter(
+                array_merge([$this->super_admin_id], $this->admin_ids)
+            ));
 
-            foreach ($all_admins as $admin_id) {
-                if (empty($admin_id)) continue;
-                $result = Request::forwardMessage([
-                    'chat_id' => $admin_id,
-                    'from_chat_id' => $chat_id,
-                    'message_id' => $message->getMessageId(),
-                ]);
-                
-                if ($result->isOk()) {
-                    $forwarded_msg_id = $result->getResult()->getMessageId();
-                    $this->forwardMap->save($forwarded_msg_id, $message->getMessageId(), $user_id);
-                }
+            // 并发转发给所有管理员，总耗时 ≈ 单次 RTT
+            $forwarded = \Utils\TgMulti::forwardToChats(
+                $this->getToken(),
+                array_map('intval', $all_admins),
+                (int) $chat_id,
+                (int) $message->getMessageId()
+            );
+
+            foreach ($forwarded as $admin_id => $forwarded_msg_id) {
+                $this->forwardMap->save($forwarded_msg_id, $message->getMessageId(), $user_id);
             }
         }
 
@@ -297,12 +304,16 @@ class GenericmessageCommand extends UserCommand
         
         $text = "✅ 新用户验证通过\n\n👤 用户信息\n├ ID: <code>{$user_id}</code>\n├ 用户名: {$username}\n├ 姓名: {$fullName}\n└ 时间: " . date('Y-m-d H:i:s') . "\n\n💡 可直接回复此用户的消息";
 
-        $all_admins = array_merge([$this->super_admin_id], $this->admin_ids);
-        $all_admins = array_unique(array_filter($all_admins));
+        $all_admins = array_unique(array_filter(
+            array_merge([$this->super_admin_id], $this->admin_ids)
+        ));
 
-        foreach ($all_admins as $admin_id) {
-            if (empty($admin_id)) continue;
-            Request::sendMessage(['chat_id' => $admin_id, 'text' => $text, 'parse_mode' => 'HTML']);
-        }
+        // 并发通知所有管理员，总耗时 ≈ 单次 RTT
+        \Utils\TgMulti::sendToChats(
+            $this->getToken(),
+            array_map('intval', $all_admins),
+            $text,
+            'HTML'
+        );
     }
 }
