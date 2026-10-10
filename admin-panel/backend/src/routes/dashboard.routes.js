@@ -17,7 +17,11 @@ router.get('/', requirePerm('dashboard:view'), async (req, res, next) => {
            FROM user_verification uv JOIN bots b ON b.bot_name = uv.bot_name
           WHERE ${scope.where}`, scope.params),
       query(
-        `SELECT COUNT(*) AS c FROM message_log ml JOIN bots b ON b.id = ml.bot_id
+        `SELECT COUNT(DISTINCT m.id) AS c
+           FROM message m
+           JOIN (SELECT DISTINCT bot_name,user_id,original_msg_id FROM forward_map) f
+             ON f.user_id = m.chat_id AND f.original_msg_id = m.id
+           JOIN bots b ON b.bot_name = f.bot_name
           WHERE ${scope.where}`, scope.params),
       query(
         `SELECT COUNT(*) AS c FROM forward_map f JOIN bots b ON b.bot_name = f.bot_name
@@ -61,14 +65,30 @@ router.get('/status', requirePerm('dashboard:view'), async (req, res, next) => {
 router.get('/trend', requirePerm('dashboard:view'), async (req, res, next) => {
   try {
     const scope = botScopeFilter(req.ctx, 'b');
+    // 与历史消息同一口径：用户上行=原消息关联 forward_map；
+    // 管理员回复=回复消息经 reply_to_message 关联 forward_map 的 forwarded_msg_id
     const data = await query(
-      `SELECT DATE(ml.created_at) AS day,
-              SUM(ml.direction = 'in') AS inbound,
-              SUM(ml.direction = 'out') AS outbound
-         FROM message_log ml JOIN bots b ON b.id = ml.bot_id
-        WHERE ${scope.where} AND ml.created_at >= DATE_SUB(CURDATE(), INTERVAL 6 DAY)
-        GROUP BY DATE(ml.created_at) ORDER BY day`,
-      scope.params
+      `SELECT DATE(t.created_at) AS day,
+              SUM(t.direction = 'in')  AS inbound,
+              SUM(t.direction = 'out') AS outbound
+         FROM (
+           SELECT m.date AS created_at, 'in' AS direction
+             FROM message m
+             JOIN (SELECT DISTINCT bot_name,user_id,original_msg_id FROM forward_map) f
+               ON f.user_id = m.chat_id AND f.original_msg_id = m.id
+             JOIN bots b ON b.bot_name = f.bot_name
+            WHERE ${scope.where}
+           UNION ALL
+           SELECT m.date, 'out'
+             FROM message m
+             JOIN (SELECT DISTINCT bot_name,user_id,forwarded_msg_id FROM forward_map) f
+               ON f.user_id = m.chat_id AND f.forwarded_msg_id = m.reply_to_message
+             JOIN bots b ON b.bot_name = f.bot_name
+            WHERE ${scope.where}
+         ) t
+        WHERE t.created_at >= DATE_SUB(CURDATE(), INTERVAL 6 DAY)
+        GROUP BY DATE(t.created_at) ORDER BY day`,
+      [...scope.params, ...scope.params]
     );
 
     // 补齐近 7 天无数据的日期，图表才连续
