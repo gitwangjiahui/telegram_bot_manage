@@ -1,3 +1,21 @@
+-- Bot 运行心跳表
+-- PHP 守护进程每轮上报真实运行状态；管理后端按心跳新鲜度判定存活，
+-- 解决后端容器看不到宿主 daemon 进程、只能依赖 is_active 静态标志的问题。
+CREATE TABLE IF NOT EXISTS bot_heartbeat (
+    bot_name VARCHAR(50) PRIMARY KEY,
+    pid INT NOT NULL,
+    started_at TIMESTAMP NULL,
+    heartbeat_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    last_update_id BIGINT NOT NULL DEFAULT 0,
+    status VARCHAR(20) NOT NULL DEFAULT 'polling',
+    today_in INT NOT NULL DEFAULT 0,
+    today_out INT NOT NULL DEFAULT 0,
+    captcha_available INT NOT NULL DEFAULT 0,
+    last_error TEXT,
+    last_error_at TIMESTAMP NULL,
+    INDEX idx_heartbeat (heartbeat_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 -- 机器人管理表
 CREATE TABLE IF NOT EXISTS bots (
     id INT AUTO_INCREMENT PRIMARY KEY,

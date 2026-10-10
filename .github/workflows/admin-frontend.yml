@@ -1,13 +1,20 @@
-name: Build & Push AdminServer Image
+name: Build Admin Web Image
 
 on:
   push:
     branches: [master]
+    paths:
+      - admin-panel/frontend/src/**
+      - admin-panel/frontend/index.html
+      - admin-panel/frontend/vite.config.js
+      - admin-panel/frontend/Dockerfile
+      - admin-panel/frontend/package.json
+      - .github/workflows/admin-frontend.yml
     tags: ['v*']
   workflow_dispatch:
 
 env:
-  IMAGE: ghcr.io/jh-tgbotmanage/adminserver
+  IMAGE: ghcr.io/jh-tgbotmanage/admin
 
 jobs:
   build:
@@ -36,14 +43,13 @@ jobs:
           tags: |
             type=ref,event=branch
             type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
             type=sha
             type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
-          context: .
+          context: admin-panel/frontend
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}

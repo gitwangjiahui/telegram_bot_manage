@@ -1,13 +1,18 @@
-name: Build & Push Admin Web Image
+name: Build AdminServer Image
 
 on:
   push:
     branches: [master]
+    paths:
+      - admin-panel/backend/src/**
+      - admin-panel/backend/Dockerfile
+      - admin-panel/backend/package.json
+      - .github/workflows/admin-backend.yml
     tags: ['v*']
   workflow_dispatch:
 
 env:
-  IMAGE: ghcr.io/jh-tgbotmanage/admin
+  IMAGE: ghcr.io/jh-tgbotmanage/adminserver
 
 jobs:
   build:
@@ -36,14 +41,13 @@ jobs:
           tags: |
             type=ref,event=branch
             type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
             type=sha
             type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
-          context: .
+          context: admin-panel/backend
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}

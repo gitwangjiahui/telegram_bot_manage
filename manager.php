@@ -355,6 +355,51 @@ class BotManagerDaemon
     }
 
     /**
+     * 聚合并上报心跳（任何聚合失败用默认值，不抛出）
+     */
+    private function sendHeartbeat(
+        string $botName, ?int $botId, string $startedAt, int $offset, string $status,
+        ?string $lastError, ?string $lastErrorAt
+    ): void {
+        $captchaAvailable = 0;
+        $todayIn = 0;
+        $todayOut = 0;
+
+        try {
+            $captchaAvailable = (new \Model\CaptchaPool($botName))->countAvailable();
+        } catch (\Throwable $e) {
+        }
+
+        if ($botId) {
+            try {
+                $pdo = Utils\DbManager::getConnection();
+                $stmt = $pdo->prepare(
+                    "SELECT SUM(direction = 'in'), SUM(direction = 'out')
+                       FROM message_log
+                      WHERE bot_id = ? AND created_at >= CURDATE()"
+                );
+                $stmt->execute([$botId]);
+                $row = $stmt->fetch(PDO::FETCH_NUM);
+                $todayIn = (int) ($row[0] ?? 0);
+                $todayOut = (int) ($row[1] ?? 0);
+            } catch (\Throwable $e) {
+            }
+        }
+
+        \Model\Heartbeat::touch($botName, [
+            'pid'               => (int) getmypid(),
+            'started_at'        => $startedAt,
+            'last_update_id'    => $offset,
+            'status'            => $status,
+            'today_in'          => $todayIn,
+            'today_out'         => $todayOut,
+            'captcha_available' => $captchaAvailable,
+            'last_error'        => $lastError !== null ? mb_substr($lastError, 0, 500) : null,
+            'last_error_at'     => $lastErrorAt,
+        ]);
+    }
+
+    /**
      * 从数据库获取 Bot 配置
      */
     private function getBotConfig(string $botName): ?array
@@ -627,7 +672,13 @@ class BotManagerDaemon
         });
 
         $botManager = null;
-        
+
+        // 心跳追踪
+        $startedAt = date('Y-m-d H:i:s');
+        $lastError = null;
+        $lastErrorAt = null;
+        $currentOffset = 0;
+
         while ($running) {
             pcntl_signal_dispatch();
 
@@ -671,6 +722,9 @@ class BotManagerDaemon
                 // 获取该 bot 的 ID 和 last_update_id
                 $botId = $this->getBotId($botName);
                 $botLastUpdateId = $botId ? $this->getBotLastUpdateId($botId) : null;
+                if ($botLastUpdateId) {
+                    $currentOffset = (int) $botLastUpdateId;
+                }
                 
                 $telegram = $botManager->getTelegram();
                 $hadUpdates = false;
@@ -678,7 +732,7 @@ class BotManagerDaemon
                     $telegram->useGetUpdatesWithoutDatabase(true);
                     $response = \Longman\TelegramBot\Request::getUpdates([
                         'offset' => $botLastUpdateId + 1,
-                        'timeout' => 30,
+                        'timeout' => 8,
                     ]);
                     if ($response->isOk()) {
                         $updates = $response->getResult();
@@ -725,6 +779,10 @@ class BotManagerDaemon
                 if (!$hadUpdates) {
                     usleep(300000);
                 }
+
+                // 上报真实运行状态
+                $this->sendHeartbeat($botName, $botId, $startedAt, $currentOffset, 'polling',
+                    $lastError, $lastErrorAt);
             } catch (\Throwable $e) {
                 // 数据库类异常：无限等待恢复，绝不退出
                 if ($this->isDbError($e)) {
