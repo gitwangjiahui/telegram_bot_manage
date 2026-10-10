@@ -1,5 +1,5 @@
 import { fetch } from 'undici';
-import { one } from './db.js';
+import { one, query } from './db.js';
 import { getDispatcher } from './proxy.js';
 
 const API = 'https://api.telegram.org';
