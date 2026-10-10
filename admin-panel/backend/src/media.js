@@ -4,7 +4,7 @@ import { getDispatcher } from './proxy.js';
 
 const API = 'https://api.telegram.org';
 
-// 头像 file_id 内存缓存：userId -> fileId|null
+// 头像 file_id 内存缓存：userId -> { fileId, apiKey }|null
 const avatarCache = new Map();
 
 // 从 Longman 实体 JSON 字段解析出可展示的媒体描述
@@ -148,9 +148,9 @@ export async function avatarProxy(req, res) {
     const botList = candidates.filter((b) => !seen.has(b.api_key) && seen.add(b.api_key));
     if (!botList.length) return res.status(404).json({ message: '无可用机器人' });
 
-    let fileId = avatarCache.get(userId);
-    if (fileId === undefined) {
-      fileId = null;
+    let cached = avatarCache.get(userId);
+    if (cached === undefined) {
+      cached = null;
       const dispatcher = await getDispatcher();
       for (const bot of botList) {
         const r = await fetch(`${API}/bot${bot.api_key}/getUserProfilePhotos`, {
@@ -162,15 +162,17 @@ export async function avatarProxy(req, res) {
         const data = await r.json();
         if (data.ok && data.result.photos?.[0]?.length) {
           const sizes = data.result.photos[0];
-          fileId = sizes[sizes.length - 1].file_id;
+          // 必须记住是哪个 bot 拿到的 file_id：file_id 跨 bot 不通用，
+          // 用别的 bot 的 token 下载会报 wrong file_id
+          cached = { fileId: sizes[sizes.length - 1].file_id, apiKey: bot.api_key };
           break;
         }
       }
-      avatarCache.set(userId, fileId);
+      avatarCache.set(userId, cached);
     }
-    if (!fileId) return res.status(404).json({ message: '无头像' });
+    if (!cached) return res.status(404).json({ message: '无头像' });
 
-    const { mime, body } = await downloadFile(botList[0].api_key, fileId);
+    const { mime, body } = await downloadFile(cached.apiKey, cached.fileId);
     res.setHeader('Content-Type', mime.startsWith('image/') ? mime : 'image/jpeg');
     res.setHeader('Cache-Control', 'private, max-age=86400');
     const { Readable } = await import('node:stream');
