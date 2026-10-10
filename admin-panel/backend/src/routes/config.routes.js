@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { query, one } from '../db.js';
 import { requirePerm } from '../auth.js';
+import { clearProxyCache } from '../proxy.js';
 
 const router = Router();
 
@@ -39,6 +40,7 @@ router.post('/', requirePerm('config:edit'), async (req, res, next) => {
                                description = VALUES(description)`,
       [bot_id, config_key, config_value ?? null, description ?? null]
     );
+    clearProxyCache();
     res.json({ ok: true });
   } catch (e) { next(e); }
 });
@@ -48,6 +50,7 @@ router.put('/:id', requirePerm('config:edit'), async (req, res, next) => {
     const { config_value, description } = req.body || {};
     await query('UPDATE config SET config_value=?, description=? WHERE id=?',
       [config_value ?? null, description ?? null, req.params.id]);
+    clearProxyCache();
     res.json({ ok: true });
   } catch (e) { next(e); }
 });
@@ -55,6 +58,7 @@ router.put('/:id', requirePerm('config:edit'), async (req, res, next) => {
 router.delete('/:id', requirePerm('config:edit'), async (req, res, next) => {
   try {
     await query('DELETE FROM config WHERE id=?', [req.params.id]);
+    clearProxyCache();
     res.json({ ok: true });
   } catch (e) { next(e); }
 });

@@ -1,10 +1,10 @@
-import { ProxyAgent, fetch } from 'undici';
-import { config } from './config.js';
+import { fetch } from 'undici';
+import { getDispatcher } from './proxy.js';
 
-const dispatcher = config.tgProxy ? new ProxyAgent(config.tgProxy) : undefined;
 const API = 'https://api.telegram.org';
 
 export async function tgCall(token, method, params = {}) {
+  const dispatcher = await getDispatcher();
   const res = await fetch(`${API}/bot${token}/${method}`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },

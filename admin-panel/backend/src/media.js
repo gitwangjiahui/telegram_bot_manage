@@ -1,8 +1,7 @@
-import { ProxyAgent, fetch } from 'undici';
+import { fetch } from 'undici';
 import { one } from './db.js';
-import { config } from './config.js';
+import { getDispatcher } from './proxy.js';
 
-const dispatcher = config.tgProxy ? new ProxyAgent(config.tgProxy) : undefined;
 const API = 'https://api.telegram.org';
 
 // 头像 file_id 内存缓存：userId -> fileId|null
@@ -58,8 +57,10 @@ export function parseMedia(m) {
   return null;
 }
 
-// 调 getFile 拿路径并下载，返回 {status, headers, body}
+// 调 getFile 拿路径并下载。返回 { mime, body, size }
+// mime 判定优先级：getFilePath 扩展名 > TG 下载响应头 Content-Type > octet-stream
 async function downloadFile(token, fileId) {
+  const dispatcher = await getDispatcher();
   const res = await fetch(`${API}/bot${token}/getFile`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -81,7 +82,10 @@ async function downloadFile(token, fileId) {
     err.status = 502;
     throw err;
   }
-  return { ext, body: fRes.body, size: fRes.headers['content-length'] };
+  const mime = EXT_MIME[ext]
+    || (fRes.headers['content-type'] && fRes.headers['content-type'].split(';')[0].trim())
+    || 'application/octet-stream';
+  return { mime, body: fRes.body, size: fRes.headers['content-length'] };
 }
 
 const EXT_MIME = {
@@ -102,12 +106,11 @@ export async function mediaProxy(req, res) {
     const bot = await one('SELECT api_key FROM bots WHERE id = ?', [botId]);
     if (!bot) return res.status(404).json({ message: '机器人不存在' });
 
-    const { ext, body } = await downloadFile(bot.api_key, fileId);
+    const { mime, body } = await downloadFile(bot.api_key, fileId);
 
-    res.setHeader('Content-Type', EXT_MIME[ext] || 'application/octet-stream');
+    res.setHeader('Content-Type', mime);
     res.setHeader('Cache-Control', 'private, max-age=86400');
     if (req.query.download) res.setHeader('Content-Disposition', 'attachment');
-    // undici Readable → Node stream
     const { Readable } = await import('node:stream');
     Readable.fromWeb(body).pipe(res);
   } catch (e) {
@@ -139,6 +142,7 @@ export async function avatarProxy(req, res) {
     let fileId = avatarCache.get(userId);
     if (fileId === undefined) {
       fileId = null;
+      const dispatcher = await getDispatcher();
       for (const bot of botList) {
         const r = await fetch(`${API}/bot${bot.api_key}/getUserProfilePhotos`, {
           method: 'POST',
@@ -157,8 +161,8 @@ export async function avatarProxy(req, res) {
     }
     if (!fileId) return res.status(404).json({ message: '无头像' });
 
-    const { ext, body } = await downloadFile(botList[0].api_key, fileId);
-    res.setHeader('Content-Type', EXT_MIME[ext] || 'image/jpeg');
+    const { mime, body } = await downloadFile(botList[0].api_key, fileId);
+    res.setHeader('Content-Type', mime.startsWith('image/') ? mime : 'image/jpeg');
     res.setHeader('Cache-Control', 'private, max-age=86400');
     const { Readable } = await import('node:stream');
     Readable.fromWeb(body).pipe(res);
