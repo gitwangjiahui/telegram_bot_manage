@@ -1,0 +1,10 @@
+# 构建上下文排除项（实现阶段使用）
+.git
+*.md
+docs
+deploy
+.env
+.env.*
+logs
+out
+*.test
