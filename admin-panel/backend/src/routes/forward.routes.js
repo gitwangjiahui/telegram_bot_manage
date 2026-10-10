@@ -64,7 +64,7 @@ router.get('/records', requirePerm('forward:view'), async (req, res, next) => {
     // 按 (bot_name,user_id,original_msg_id) 取最早一条转发记录代表
     const rows = await query(
       `SELECT t.bot_name, t.bot_id, t.user_id,
-              t.original_msg_id, t.forwarded_msg_id, t.created_at,
+              t.original_msg_id, t.forwarded_msg_id, fm.created_at,
               u.username, u.first_name, u.last_name,
               m.text, m.caption, m.photo, m.sticker,
               CASE
