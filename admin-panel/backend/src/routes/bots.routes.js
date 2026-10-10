@@ -13,8 +13,13 @@ router.get('/', requirePerm('bot:view'), async (req, res, next) => {
       `SELECT b.id, b.bot_name, b.bot_username, b.is_active, b.created_at,
               hb.pid, hb.started_at, hb.heartbeat_at, hb.captcha_available,
               hb.today_in, hb.today_out, hb.last_error,
-              CASE WHEN hb.heartbeat_at >= DATE_SUB(NOW(), INTERVAL 90 SECOND)
-                   THEN 1 ELSE 0 END AS is_running,
+              CASE
+                WHEN (SELECT c.action FROM bot_control c
+                       WHERE c.bot_id = b.id AND c.status = 'done'
+                       ORDER BY c.id DESC LIMIT 1) = 'stop'
+                THEN 0
+                WHEN hb.heartbeat_at >= DATE_SUB(NOW(), INTERVAL 90 SECOND)
+                THEN 1 ELSE 0 END AS is_running,
               (SELECT COUNT(DISTINCT uv.user_id) FROM user_verification uv
                 WHERE uv.bot_name = b.bot_name) AS user_count,
               (SELECT COUNT(*) FROM bot_admin_rela r WHERE r.bot_id = b.id) AS admin_count
