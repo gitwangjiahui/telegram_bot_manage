@@ -95,6 +95,13 @@ const EXT_MIME = {
   wav: 'audio/wav', pdf: 'application/pdf',
 };
 
+// 按业务媒体类型指定 MIME（TG 对无扩展名文件一律返回 octet-stream，必须由我们纠正）
+const TYPE_MIME = {
+  photo: 'image/jpeg', sticker: 'image/webp', video: 'video/mp4',
+  animation: 'video/mp4', video_note: 'video/mp4', voice: 'audio/ogg',
+  audio: 'audio/mpeg', document: 'application/octet-stream',
+};
+
 // 通用媒体代理：GET /media/:botId?file_id=xxx&download=1
 export async function mediaProxy(req, res) {
   try {
@@ -108,7 +115,9 @@ export async function mediaProxy(req, res) {
 
     const { mime, body } = await downloadFile(bot.api_key, fileId);
 
-    res.setHeader('Content-Type', mime);
+    // type 查询参数优先（解决 TG file_0 无扩展名问题）
+    const finalMime = TYPE_MIME[String(req.query.type || '')] || mime;
+    res.setHeader('Content-Type', finalMime);
     res.setHeader('Cache-Control', 'private, max-age=86400');
     if (req.query.download) res.setHeader('Content-Disposition', 'attachment');
     const { Readable } = await import('node:stream');

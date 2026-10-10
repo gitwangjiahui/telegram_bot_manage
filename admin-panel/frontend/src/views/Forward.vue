@@ -60,8 +60,8 @@
           <template #default="{ row }">
             <div class="content-cell">
               <el-image v-if="row.thumb_file_id" class="thumb"
-                :src="`/server/api/media/${row.bot_id}?file_id=${row.thumb_file_id}`"
-                :preview-src-list="[`/server/api/media/${row.bot_id}?file_id=${row.thumb_file_id}`]"
+                :src="`/server/api/media/${row.bot_id}?file_id=${row.thumb_file_id}&type=${row.msg_type}`"
+                :preview-src-list="[`/server/api/media/${row.bot_id}?file_id=${row.thumb_file_id}&type=${row.msg_type}`]"
                 preview-teleported fit="cover" />
               <el-tag v-if="row.msg_type && row.msg_type !== 'text'" size="small" type="info"
                       style="margin-right: 6px">{{ typeNames[row.msg_type] || row.msg_type }}</el-tag>

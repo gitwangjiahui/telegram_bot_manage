@@ -71,10 +71,14 @@ function decorate(row, botId) {
     msg_type: row.msg_type,
     text_content: row.text_content,
     created_at: row.created_at,
-    media: media ? { ...media, url: `/server/api/media/${botId}?file_id=${media.file_id}` } : null,
+    media: media ? {
+      ...media,
+      url: `/server/api/media/${botId}?file_id=${media.file_id}&type=${media.type}`,
+    } : null,
   };
   if (media?.thumb_id && media.thumb_id !== media.file_id) {
-    out.media.thumb_url = `/server/api/media/${botId}?file_id=${media.thumb_id}`;
+    out.media.thumb_url =
+      `/server/api/media/${botId}?file_id=${media.thumb_id}&type=${media.type}`;
   }
   return out;
 }
