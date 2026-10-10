@@ -70,13 +70,13 @@
           </div>
           <!-- 管理员/后台回复（右侧） -->
           <div v-else class="msg-row right">
-            <div class="bubble admin-bubble">
+            <div class="bubble admin-bubble" :class="{ 'is-pending': m._temp }">
               <MediaContent v-if="m.media" :media="m.media" />
               <div v-if="m.text_content" class="bubble-text"
                    :class="{ 'has-media': m.media }">{{ m.text_content }}</div>
-              <div class="bubble-time">{{ formatHM(m.created_at) }}</div>
+              <div class="bubble-time">{{ m._temp ? '发送中…' : formatHM(m.created_at) }}</div>
             </div>
-            <el-avatar :size="34" :src="`/server/api/avatar/${m.sender_id}`">
+            <el-avatar v-if="!m._temp" :size="34" :src="`/server/api/avatar/${m.sender_id}`">
               <el-icon><UserFilled /></el-icon>
             </el-avatar>
           </div>
@@ -103,6 +103,7 @@ import { onMounted, ref } from 'vue';
 import { Search, Refresh, Promotion } from '@element-plus/icons-vue';
 import { ElMessage } from 'element-plus';
 import api from '../api';
+import { sendMessageViaWs } from '../ws';
 import MediaContent from '../components/MediaContent.vue';
 
 // fixedBot：指定后锁定单个机器人（用于 BotDetail 标签内），隐藏机器人筛选
@@ -161,19 +162,67 @@ async function loadHistory() {
 
 async function sendReply() {
   const text = draft.value.trim();
-  if (!text) return;
+  if (!text || sending.value) return;
   sending.value = true;
+
+  // 即时乐观气泡：点击即显示，不必等待 TG 往返 + 历史重新拉取
+  const now = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  const stamp = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ` +
+                `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+  const temp = {
+    id: `temp-${now.getTime()}`, direction: 'out',
+    text_content: text, created_at: stamp, _temp: true,
+  };
+  messages.value.push(temp);
+  draft.value = '';
+  await scrollToBottom();
+
   try {
-    await api.post('/messages/reply', {
-      bot_id: current.value.bot_id,
-      user_id: current.value.user_id,
-      text,
-    });
-    draft.value = '';
-    await loadHistory();
+    let ok = false;
+    try {
+      const r = await sendMessageViaWs({
+        bot_id: current.value.bot_id,
+        user_id: current.value.user_id,
+        text,
+      });
+      ok = !!(r && r.ok);
+      if (!ok) throw new Error(r?.error || '发送失败');
+    } catch (wsErr) {
+      // WS 未连接/超时：回退原 HTTP 接口
+      if (wsErr.message === 'WS_NOT_OPEN' || wsErr.message === 'WS_TIMEOUT') {
+        await api.post('/messages/reply', {
+          bot_id: current.value.bot_id,
+          user_id: current.value.user_id,
+          text,
+        });
+        ok = true;
+      } else {
+        throw wsErr;
+      }
+    }
+    if (ok) {
+      // 归档异步，稍候静默用真实记录替换临时气泡
+      setTimeout(loadHistoryQuiet, 600);
+    }
   } catch (e) {
+    // 失败：移除临时气泡，恢复草稿
+    messages.value = messages.value.filter((m) => m.id !== temp.id);
+    draft.value = text;
     ElMessage.error(e.message || '发送失败');
   } finally { sending.value = false; }
+}
+
+// 静默重载：用真实数据替换列表，但不显示 loading
+async function loadHistoryQuiet() {
+  if (!current.value) return;
+  try {
+    const real = await api.get('/messages/history', {
+      params: { bot_id: current.value.bot_id, user_id: current.value.user_id },
+    });
+    messages.value = real;
+    await scrollToBottom();
+  } catch { /* 保留乐观气泡 */ }
 }
 
 async function scrollToBottom() {
