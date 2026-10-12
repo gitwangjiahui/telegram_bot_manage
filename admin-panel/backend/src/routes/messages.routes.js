@@ -29,15 +29,24 @@ const TYPE_CASE = `CASE
 const NULL_MEDIA = MEDIA_COLS.map(() => 'NULL').join(',');
 
 // 会话内全部消息：用户上行 + 管理员回复（message 表），后台回复（message_log）
+// 入站归属来源：forward_map（被转发的消息）∪ user_verification（已验证用户的全部私聊），
+// 后者覆盖 /start、验证过程等未触发转发但确属该 bot 会话的历史消息。
 const CONVERSATION_SQL = `
     SELECT m.id AS db_id, m.chat_id, m.id AS tg_msg_id, 'in' AS direction,
            m.user_id AS sender_id, ${TYPE_CASE} AS msg_type,
            COALESCE(m.text, m.caption) AS text_content, m.date AS created_at,
            ${MEDIA_COLS.map((c) => `m.${c}`).join(',')}
       FROM message m
-      JOIN (SELECT DISTINCT bot_name, user_id, original_msg_id FROM forward_map) f
-        ON f.user_id = m.chat_id AND f.original_msg_id = m.id
-     WHERE f.bot_name = ? AND f.user_id = ?
+      JOIN (
+        SELECT bot_name, user_id, original_msg_id AS msg_id, 1 AS via_fmap FROM forward_map
+        UNION
+        /* 仅归属“只验证过单个 bot”的用户：message 表不记 bot，多 bot 用户无法区分，避免串会话 */
+        SELECT uv.bot_name, uv.user_id, NULL, 0
+          FROM user_verification uv
+         WHERE (SELECT COUNT(DISTINCT x.bot_name) FROM user_verification x
+                 WHERE x.user_id = uv.user_id) = 1
+      ) g ON g.user_id = m.chat_id AND (g.via_fmap = 0 OR g.msg_id = m.id)
+     WHERE g.bot_name = ? AND g.user_id = ?
     UNION
     SELECT m.id, m.chat_id, m.id, 'out',
            m.user_id, ${TYPE_CASE},
@@ -97,13 +106,21 @@ router.get('/conversations', requirePerm('message:view'), async (req, res, next)
     }
 
     const rows = await query(
-      `SELECT b.id AS bot_id, f.bot_name, f.user_id,
+      `SELECT b.id AS bot_id, g.bot_name, g.user_id,
               u.username, u.first_name, u.last_name
-         FROM (SELECT DISTINCT bot_name, user_id FROM forward_map) f
-         JOIN bots b ON b.bot_name = f.bot_name
-         LEFT JOIN user u ON u.id = f.user_id
+         FROM (
+           SELECT DISTINCT bot_name, user_id FROM forward_map
+           UNION
+           SELECT DISTINCT uv.bot_name, uv.user_id
+             FROM user_verification uv
+            WHERE (SELECT COUNT(DISTINCT x.bot_name) FROM user_verification x
+                    WHERE x.user_id = uv.user_id) = 1
+         ) g
+         JOIN bots b ON b.bot_name = g.bot_name
+         LEFT JOIN user u ON u.id = g.user_id
         WHERE ${where.join(' AND ')}
-        ORDER BY f.bot_name, f.user_id`,
+        GROUP BY b.id, g.user_id
+        ORDER BY g.bot_name, g.user_id`,
       params
     );
 
