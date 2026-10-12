@@ -6,6 +6,7 @@ on:
     paths:
       - admin-panel/frontend/src/**
       - admin-panel/frontend/index.html
+      - admin-panel/frontend/nginx.conf
       - admin-panel/frontend/vite.config.js
       - admin-panel/frontend/Dockerfile
       - admin-panel/frontend/package.json

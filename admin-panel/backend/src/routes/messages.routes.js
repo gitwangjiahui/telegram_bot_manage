@@ -135,7 +135,7 @@ router.get('/history', requirePerm('message:view'), async (req, res, next) => {
 
     const rows = await query(
       `SELECT t.* FROM (${CONVERSATION_SQL}) t ORDER BY t.created_at, t.db_id`,
-      [bot_id, bot_id, user_id]
+      [bot_id, user_id, bot_id, user_id]
     );
 
     const seen = new Set();
