@@ -27,7 +27,7 @@ const CONVERSATION_SQL = `
            ml.raw_content,
            CASE WHEN ml.direction = 'in' AND EXISTS (
                   SELECT 1 FROM forward_map fm
-                   WHERE fm.bot_name = ml.bot_name
+                   WHERE fm.bot_name = ml.bot_name COLLATE utf8mb4_unicode_ci
                      AND fm.user_id  = ml.user_id
                      AND fm.original_msg_id = ml.message_id)
                 THEN 1 ELSE 0 END AS forwarded
