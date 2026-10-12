@@ -21,7 +21,8 @@ router.get('/', requirePerm('dashboard:view'), async (req, res, next) => {
            FROM message_log g JOIN bots b ON b.id = g.bot_id
           WHERE ${scope.where}`, scope.params),
       query(
-        `SELECT COUNT(*) AS c FROM forward_map f JOIN bots b ON b.bot_name = f.bot_name
+        `SELECT COUNT(DISTINCT f.bot_name, f.user_id, f.original_msg_id) AS c
+           FROM forward_map f JOIN bots b ON b.bot_name = f.bot_name
           WHERE ${scope.where}`, scope.params),
       query(
         `SELECT COUNT(*) AS c
