@@ -79,13 +79,15 @@
           <!-- 管理员/后台回复（右侧） -->
           <div v-else class="msg-row right">
             <div class="bubble admin-bubble" :class="{ 'is-pending': m._temp }">
+              <div v-if="m.sender_name" class="bubble-sender">{{ m.sender_name }}</div>
               <MediaContent v-if="m.media" :media="m.media" />
               <div v-if="m.text_content" class="bubble-text"
                    :class="{ 'has-media': m.media }">{{ m.text_content }}</div>
               <div class="bubble-time">{{ formatHM(m.created_at) }}</div>
             </div>
-            <el-avatar :size="34" class="admin-ava" :src="m._temp ? undefined : `/server/api/avatar/${m.sender_id}`">
-              <el-icon v-if="!m._temp"><UserFilled /></el-icon>
+            <el-avatar :size="34" class="admin-ava"
+                       :src="(!m._temp && m.sender_id) ? `/server/api/avatar/${m.sender_id}` : undefined">
+              <el-icon v-if="m._temp || !m.sender_id"><UserFilled /></el-icon>
             </el-avatar>
           </div>
         </template>
@@ -181,6 +183,7 @@ async function sendReply() {
   const temp = {
     id: `temp-${now.getTime()}`, direction: 'out',
     text_content: text, created_at: stamp, _temp: true,
+    sender_id: 0, sender_name: '管理员',
   };
   messages.value.push(temp);
   draft.value = '';
@@ -354,6 +357,12 @@ onMounted(async () => {
 .user-bubble .bubble-text { background: #fff; color: #303133; border-top-left-radius: 4px; }
 .admin-bubble .bubble-text { background: #2AABEE; color: #fff; border-top-right-radius: 4px; }
 .bubble-text.has-media { margin-top: 8px; }
+.bubble-sender {
+  font-size: 11px; line-height: 1.2;
+  color: #1d8ec4;
+  margin: 0 2px 3px 2px; font-weight: 600;
+  text-align: right;
+}
 .bubble-time {
   font-size: 11px; color: #909399;
   text-align: right; margin-top: 2px;

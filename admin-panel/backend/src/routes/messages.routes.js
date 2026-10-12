@@ -25,6 +25,8 @@ const CONVERSATION_SQL = `
            ml.text_content,
            ml.created_at,
            ml.raw_content,
+           sa.first_name AS sender_first_name,
+           sa.username   AS sender_username,
            CASE WHEN ml.direction = 'in' AND EXISTS (
                   SELECT 1 FROM forward_map fm
                    WHERE fm.bot_name = ml.bot_name COLLATE utf8mb4_unicode_ci
@@ -32,16 +34,24 @@ const CONVERSATION_SQL = `
                      AND fm.original_msg_id = ml.message_id)
                 THEN 1 ELSE 0 END AS forwarded
       FROM message_log ml
+      LEFT JOIN admins sa ON sa.id = ml.sender_id AND ml.direction = 'out'
      WHERE ml.bot_id = ? AND ml.user_id = ?
 `;
 
 function decorate(row, botId) {
   const media = parseMedia(parseRaw(row.raw_content) || {});
+  // 回复人：历史回复 sender_id 是 TG 客服（join admins）；web/Go 新回复 sender_id=0。
+  let senderName = null;
+  if (row.direction === 'out') {
+    senderName = row.sender_first_name || row.sender_username
+      || (Number(row.sender_id) === 0 ? '管理员' : null);
+  }
   const out = {
     db_id: row.db_id,
     tg_msg_id: row.tg_msg_id,
     direction: row.direction,
     sender_id: row.sender_id,
+    sender_name: senderName,
     msg_type: row.msg_type,
     text_content: row.text_content,
     created_at: row.created_at,
