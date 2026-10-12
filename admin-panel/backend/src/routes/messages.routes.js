@@ -39,7 +39,7 @@ const CONVERSATION_SQL = `
                     WHERE fm.user_id = m.chat_id AND fm.original_msg_id = m.id) AS forwarded,
            ${MEDIA_COLS.map((c) => `m.${c}`).join(',')}
       FROM message m
-     WHERE m.bot_id = ? AND m.chat_id = m.user_id
+     WHERE m.bot_id = ? AND m.user_id = ? AND m.chat_id = m.user_id
     UNION
     SELECT ml.id, 0, ml.message_id,
            ml.direction COLLATE utf8mb4_unicode_520_ci,
@@ -113,7 +113,7 @@ router.get('/conversations', requirePerm('message:view'), async (req, res, next)
     for (const c of rows) {
       const stat = await one(
         `SELECT COUNT(*) AS cnt, MAX(t.created_at) AS last_at FROM (${CONVERSATION_SQL}) t`,
-        [c.bot_id, c.bot_id, c.user_id]
+        [c.bot_id, c.user_id, c.bot_id, c.user_id]
       );
       c.msg_count = stat.cnt;
       c.last_at = stat.last_at;
