@@ -7,11 +7,13 @@ const API = 'https://api.telegram.org';
 // 头像 file_id 内存缓存：userId -> { fileId, apiKey }|null
 const avatarCache = new Map();
 
-// 从 Longman 实体 JSON 字段解析出可展示的媒体描述
+// 从入站归档实体解析出可展示的媒体描述。
+// 入参既可能是 Longman 列里的 JSON 字符串，也可能是 raw_content 解析后的对象。
 export function parseMedia(m) {
-  const pick = (jsonStr) => {
-    if (!jsonStr) return null;
-    try { return JSON.parse(jsonStr); } catch { return null; }
+  const pick = (v) => {
+    if (!v) return null;
+    if (typeof v === 'object') return v;   // 已是解析后的实体（message_log.raw_content）
+    try { return JSON.parse(v); } catch { return null; }
   };
 
   const photo = pick(m.photo);
