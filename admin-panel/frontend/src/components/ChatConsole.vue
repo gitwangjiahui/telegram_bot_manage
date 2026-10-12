@@ -67,7 +67,11 @@
               <div v-if="!m.text_content && !m.media" class="bubble-text">[非文本消息]</div>
               <div class="bubble-meta">
                 <span v-if="m.direction === 'in'" class="fwd-tag"
-                      :class="{ on: m.forwarded }">{{ m.forwarded ? '已转发' : '未转发' }}</span>
+                      :class="{ on: m.forwarded, busy: m._fwdBusy }">
+                  <span v-if="m._fwdBusy" class="fwd-spin" />
+                  <a v-else-if="!m.forwarded" class="fwd-link" @click.stop="forwardOne(m)">转发</a>
+                  <span v-else>已转发</span>
+                </span>
                 <span class="bubble-time">{{ formatHM(m.created_at) }}</span>
               </div>
             </div>
@@ -78,10 +82,10 @@
               <MediaContent v-if="m.media" :media="m.media" />
               <div v-if="m.text_content" class="bubble-text"
                    :class="{ 'has-media': m.media }">{{ m.text_content }}</div>
-              <div class="bubble-time">{{ m._temp ? '发送中…' : formatHM(m.created_at) }}</div>
+              <div class="bubble-time">{{ formatHM(m.created_at) }}</div>
             </div>
-            <el-avatar v-if="!m._temp" :size="34" :src="`/server/api/avatar/${m.sender_id}`">
-              <el-icon><UserFilled /></el-icon>
+            <el-avatar :size="34" class="admin-ava" :src="m._temp ? undefined : `/server/api/avatar/${m.sender_id}`">
+              <el-icon v-if="!m._temp"><UserFilled /></el-icon>
             </el-avatar>
           </div>
         </template>
@@ -107,7 +111,7 @@ import { onMounted, ref } from 'vue';
 import { Search, Refresh, Promotion } from '@element-plus/icons-vue';
 import { ElMessage } from 'element-plus';
 import api from '../api';
-import { sendMessageViaWs } from '../ws';
+import { sendMessageViaWs, forwardMessageViaWs } from '../ws';
 import MediaContent from '../components/MediaContent.vue';
 
 // fixedBot：指定后锁定单个机器人（用于 BotDetail 标签内），隐藏机器人筛选
@@ -206,8 +210,9 @@ async function sendReply() {
       }
     }
     if (ok) {
-      // 归档异步，稍候静默用真实记录替换临时气泡
-      setTimeout(loadHistoryQuiet, 600);
+      // 原地把临时气泡转为正式气泡：不整表 reload，避免节点重挂造成的跳动
+      temp._temp = false;
+      temp.sender_id = 0;
     }
   } catch (e) {
     // 失败：移除临时气泡，恢复草稿
@@ -217,16 +222,27 @@ async function sendReply() {
   } finally { sending.value = false; }
 }
 
-// 静默重载：用真实数据替换列表，但不显示 loading
-async function loadHistoryQuiet() {
-  if (!current.value) return;
+// 手动补转发一条未转发消息（WS 同步响应）。
+async function forwardOne(m) {
+  if (m._fwdBusy || m.forwarded) return;
+  m._fwdBusy = true;
   try {
-    const real = await api.get('/messages/history', {
-      params: { bot_id: current.value.bot_id, user_id: current.value.user_id },
+    const r = await forwardMessageViaWs({
+      bot_id: current.value.bot_id,
+      user_id: current.value.user_id,
+      tg_msg_id: m.tg_msg_id,
     });
-    messages.value = real;
-    await scrollToBottom();
-  } catch { /* 保留乐观气泡 */ }
+    if (r && r.ok) {
+      m.forwarded = true;
+      ElMessage.success(`已转发给 ${r.forwarded}/${r.targets} 位管理员`);
+    } else {
+      ElMessage.error((r && r.error) || '转发失败');
+    }
+  } catch (e) {
+    ElMessage.error(e.message === 'WS_NOT_OPEN' ? 'WS 未连接，稍后重试' : '转发失败：' + (e.message || ''));
+  } finally {
+    m._fwdBusy = false;
+  }
 }
 
 async function scrollToBottom() {
@@ -352,6 +368,17 @@ onMounted(async () => {
   background: rgba(0,0,0,0.06); color: #909399;
 }
 .fwd-tag.on { background: rgba(42,171,238,0.14); color: #1d8ec4; }
+.fwd-tag.busy { background: rgba(0,0,0,0.06); color: #909399; display: inline-flex; align-items: center; gap: 4px; }
+.fwd-link { cursor: pointer; color: #409eff; }
+.fwd-link:hover { text-decoration: underline; }
+.fwd-spin {
+  width: 8px; height: 8px; border-radius: 50%;
+  border: 1.5px solid #c0c4cc; border-top-color: transparent;
+  display: inline-block; animation: fwdrot .7s linear infinite;
+}
+@keyframes fwdrot { to { transform: rotate(360deg); } }
+/* 管理员头像始终占位，临时气泡不冒头像导致整行跳动 */
+.admin-ava { flex-shrink: 0; }
 .admin-bubble .bubble-time { color: rgba(255,255,255,0.75); }
 
 .chat-input {

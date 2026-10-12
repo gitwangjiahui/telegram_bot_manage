@@ -27,8 +27,8 @@ export function off(type, fn) {
 }
 
 function dispatch(frame) {
-  // 先满足按 client_msg_id 等待的请求。
-  if (frame.type === 'send_message_result' && frame.data && frame.data.client_msg_id) {
+  // 先满足按 client_msg_id 等待的请求（send/forward 等 *_result 帧）。
+  if (frame.data && frame.data.client_msg_id) {
     const p = pendingReplies.get(frame.data.client_msg_id);
     if (p) {
       clearTimeout(p.timer);
@@ -102,24 +102,23 @@ export function stopWs() {
   wsState.connected = false;
 }
 
-// 通过 WS 让 botd 本地代发，避免 Node 同步走代理调 Telegram 的高延迟。
-// 返回 Promise<{ok, message_id?, error?}>。WS 不可用时 reject，由调用方回退 HTTP。
-export function sendMessageViaWs({ bot_id, user_id, text }, timeoutMs = 20000) {
+// 通用请求-应答：发一帧并等待 botd 回 resultType（按 client_msg_id 匹配）。
+function requestViaWs(type, resultType, payload, timeoutMs = 25000) {
   return new Promise((resolve, reject) => {
     if (!ws || ws.readyState !== WebSocket.OPEN) {
       reject(new Error('WS_NOT_OPEN'));
-      return;
+      return
     }
     const clientMsgId = `m${Date.now()}-${++replySeq}`;
     const timer = setTimeout(() => {
       if (pendingReplies.delete(clientMsgId)) reject(new Error('WS_TIMEOUT'));
     }, timeoutMs);
-    pendingReplies.set(clientMsgId, { resolve, timer });
+    pendingReplies.set(clientMsgId, { resolve, timer, resultType });
     try {
       ws.send(JSON.stringify({
-        type: 'send_message',
+        type,
         ts: Math.floor(Date.now() / 1000),
-        data: { client_msg_id: clientMsgId, bot_id, user_id, text },
+        data: { client_msg_id: clientMsgId, ...payload },
       }));
     } catch (e) {
       clearTimeout(timer);
@@ -127,4 +126,16 @@ export function sendMessageViaWs({ bot_id, user_id, text }, timeoutMs = 20000) {
       reject(e);
     }
   });
+}
+
+// 通过 WS 让 botd 本地代发，避免 Node 同步走代理调 Telegram 的高延迟。
+// 返回 Promise<{ok, message_id?, error?}>。WS 不可用时 reject，由调用方回退 HTTP。
+export function sendMessageViaWs(p, timeoutMs = 20000) {
+  return requestViaWs('send_message', 'send_message_result', p, timeoutMs);
+}
+
+// 通过 WS 让 botd 把历史里某条未转发消息补转发给管理员。
+// 返回 Promise<{ok, forwarded, targets, error?}>。
+export function forwardMessageViaWs(p, timeoutMs = 25000) {
+  return requestViaWs('forward_message', 'forward_message_result', p, timeoutMs);
 }
