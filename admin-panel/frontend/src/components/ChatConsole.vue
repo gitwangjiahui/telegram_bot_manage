@@ -65,7 +65,11 @@
               <div v-if="m.text_content" class="bubble-text"
                    :class="{ 'has-media': m.media }">{{ m.text_content }}</div>
               <div v-if="!m.text_content && !m.media" class="bubble-text">[非文本消息]</div>
-              <div class="bubble-time">{{ formatHM(m.created_at) }}</div>
+              <div class="bubble-meta">
+                <span v-if="m.direction === 'in'" class="fwd-tag"
+                      :class="{ on: m.forwarded }">{{ m.forwarded ? '已转发' : '未转发' }}</span>
+                <span class="bubble-time">{{ formatHM(m.created_at) }}</span>
+              </div>
             </div>
           </div>
           <!-- 管理员/后台回复（右侧） -->
@@ -338,6 +342,16 @@ onMounted(async () => {
   font-size: 11px; color: #909399;
   text-align: right; margin-top: 2px;
 }
+.bubble-meta {
+  display: flex; align-items: center; justify-content: flex-end; gap: 6px;
+  margin-top: 2px;
+}
+.fwd-tag {
+  font-size: 10px; line-height: 1;
+  padding: 2px 6px; border-radius: 8px;
+  background: rgba(0,0,0,0.06); color: #909399;
+}
+.fwd-tag.on { background: rgba(42,171,238,0.14); color: #1d8ec4; }
 .admin-bubble .bubble-time { color: rgba(255,255,255,0.75); }
 
 .chat-input {

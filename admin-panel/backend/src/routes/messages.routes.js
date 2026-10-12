@@ -28,34 +28,18 @@ const TYPE_CASE = `CASE
 
 const NULL_MEDIA = MEDIA_COLS.map(() => 'NULL').join(',');
 
-// 会话内全部消息：用户上行 + 管理员回复（message 表），后台回复（message_log）
-// 入站归属来源：forward_map（被转发的消息）∪ user_verification（已验证用户的全部私聊），
-// 后者覆盖 /start、验证过程等未触发转发但确属该 bot 会话的历史消息。
+// 会话内全部消息：归属以 message.bot_id 为准（入站时由 botd 直接写入）。
+// - in  ：用户私聊侧（chat_id=user_id，排除转发到管理员侧的副本），并按 forward_map 打转发标记
+// - out ：后台/管理员回复（message_log，sender_id=0）
 const CONVERSATION_SQL = `
     SELECT m.id AS db_id, m.chat_id, m.id AS tg_msg_id, 'in' AS direction,
            m.user_id AS sender_id, ${TYPE_CASE} AS msg_type,
            COALESCE(m.text, m.caption) AS text_content, m.date AS created_at,
+           EXISTS (SELECT 1 FROM forward_map fm
+                    WHERE fm.user_id = m.chat_id AND fm.original_msg_id = m.id) AS forwarded,
            ${MEDIA_COLS.map((c) => `m.${c}`).join(',')}
       FROM message m
-      JOIN (
-        SELECT bot_name, user_id, original_msg_id AS msg_id, 1 AS via_fmap FROM forward_map
-        UNION
-        /* 仅归属“只验证过单个 bot”的用户：message 表不记 bot，多 bot 用户无法区分，避免串会话 */
-        SELECT uv.bot_name, uv.user_id, NULL, 0
-          FROM user_verification uv
-         WHERE (SELECT COUNT(DISTINCT x.bot_name) FROM user_verification x
-                 WHERE x.user_id = uv.user_id) = 1
-      ) g ON g.user_id = m.chat_id AND (g.via_fmap = 0 OR g.msg_id = m.id)
-     WHERE g.bot_name = ? AND g.user_id = ?
-    UNION
-    SELECT m.id, m.chat_id, m.id, 'out',
-           m.user_id, ${TYPE_CASE},
-           COALESCE(m.text, m.caption), m.date,
-           ${MEDIA_COLS.map((c) => `m.${c}`).join(',')}
-      FROM message m
-      JOIN (SELECT DISTINCT bot_name, user_id, forwarded_msg_id FROM forward_map) f
-        ON f.forwarded_msg_id = m.reply_to_message
-     WHERE f.bot_name = ? AND f.user_id = ?
+     WHERE m.bot_id = ? AND m.chat_id = m.user_id
     UNION
     SELECT ml.id, 0, ml.message_id,
            ml.direction COLLATE utf8mb4_unicode_520_ci,
@@ -63,9 +47,10 @@ const CONVERSATION_SQL = `
            ml.msg_type COLLATE utf8mb4_unicode_520_ci,
            ml.text_content COLLATE utf8mb4_unicode_520_ci,
            ml.created_at,
+           0,
            ${NULL_MEDIA}
       FROM message_log ml
-     WHERE ml.bot_name = ? AND ml.user_id = ? AND ml.sender_id = 0
+     WHERE ml.bot_id = ? AND ml.user_id = ? AND ml.sender_id = 0
  `;
 
 function decorate(row, botId) {
@@ -80,6 +65,7 @@ function decorate(row, botId) {
     msg_type: row.msg_type,
     text_content: row.text_content,
     created_at: row.created_at,
+    forwarded: Number(row.forwarded) === 1,
     media: media ? {
       ...media,
       url: `/server/api/media/${botId}?file_id=${media.file_id}&type=${media.type}`,
@@ -101,33 +87,33 @@ router.get('/conversations', requirePerm('message:view'), async (req, res, next)
     const params = [...scope.params];
     if (bot_id) { where.push('b.id = ?'); params.push(bot_id); }
     if (keyword) {
-      where.push('(u.username LIKE ? OR CAST(f.user_id AS CHAR) LIKE ? OR u.first_name LIKE ?)');
+      where.push('(u.username LIKE ? OR CAST(g.user_id AS CHAR) LIKE ? OR u.first_name LIKE ?)');
       params.push(`%${keyword}%`, `%${keyword}%`, `%${keyword}%`);
     }
 
     const rows = await query(
-      `SELECT b.id AS bot_id, g.bot_name, g.user_id,
+      `SELECT b.id AS bot_id, b.bot_name, g.user_id,
               u.username, u.first_name, u.last_name
          FROM (
-           SELECT DISTINCT bot_name, user_id FROM forward_map
-           UNION
-           SELECT DISTINCT uv.bot_name, uv.user_id
-             FROM user_verification uv
-            WHERE (SELECT COUNT(DISTINCT x.bot_name) FROM user_verification x
-                    WHERE x.user_id = uv.user_id) = 1
+           SELECT bot_id, user_id, MAX(created_at) AS last_at FROM (
+             SELECT m.bot_id, m.user_id, m.date AS created_at
+               FROM message m WHERE m.bot_id IS NOT NULL AND m.chat_id = m.user_id
+             UNION ALL
+             SELECT ml.bot_id, ml.user_id, ml.created_at
+               FROM message_log ml WHERE ml.sender_id = 0
+           ) x GROUP BY bot_id, user_id
          ) g
-         JOIN bots b ON b.bot_name = g.bot_name
+         JOIN bots b ON b.id = g.bot_id
          LEFT JOIN user u ON u.id = g.user_id
         WHERE ${where.join(' AND ')}
-        GROUP BY b.id, g.user_id
-        ORDER BY g.bot_name, g.user_id`,
+        ORDER BY g.last_at DESC`,
       params
     );
 
     for (const c of rows) {
       const stat = await one(
         `SELECT COUNT(*) AS cnt, MAX(t.created_at) AS last_at FROM (${CONVERSATION_SQL}) t`,
-        [c.bot_name, c.user_id, c.bot_name, c.user_id, c.bot_name, c.user_id]
+        [c.bot_id, c.bot_id, c.user_id]
       );
       c.msg_count = stat.cnt;
       c.last_at = stat.last_at;
@@ -149,7 +135,7 @@ router.get('/history', requirePerm('message:view'), async (req, res, next) => {
 
     const rows = await query(
       `SELECT t.* FROM (${CONVERSATION_SQL}) t ORDER BY t.created_at, t.db_id`,
-      [bot.bot_name, user_id, bot.bot_name, user_id, bot.bot_name, user_id]
+      [bot_id, bot_id, user_id]
     );
 
     const seen = new Set();
