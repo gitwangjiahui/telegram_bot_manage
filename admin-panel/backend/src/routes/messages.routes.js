@@ -6,57 +6,37 @@ import { parseMedia } from '../media.js';
 
 const router = Router();
 
-// Longman message 表中可展示的媒体原始 JSON 列（in/out 分支取实体，message_log 分支补 NULL）
-const MEDIA_COLS = [
-  'photo', 'video', 'document', 'sticker', 'voice',
-  'animation', 'audio', 'video_note', 'contact', 'location',
-];
+// 方案A：消息展示/统计统一走 message_log（独立自增主键、天然带 bot_id/direction），
+// 不再 UNION Longman message 表——后者主键 (chat_id,id) 不含 bot_id，多 bot 共库会撞键。
+// raw_content 存标准 Telegram message JSON，媒体直接交给 parseMedia 解析。
+function parseRaw(s) {
+  if (!s) return null;
+  try { return JSON.parse(s); } catch { return null; }
+}
 
-const TYPE_CASE = `CASE
-    WHEN m.photo IS NOT NULL THEN 'photo'
-    WHEN m.voice IS NOT NULL THEN 'voice'
-    WHEN m.video IS NOT NULL THEN 'video'
-    WHEN m.video_note IS NOT NULL THEN 'video_note'
-    WHEN m.document IS NOT NULL THEN 'document'
-    WHEN m.sticker IS NOT NULL THEN 'sticker'
-    WHEN m.animation IS NOT NULL THEN 'animation'
-    WHEN m.audio IS NOT NULL THEN 'audio'
-    WHEN m.contact IS NOT NULL THEN 'contact'
-    WHEN m.location IS NOT NULL THEN 'location'
-    WHEN m.text IS NOT NULL THEN 'text'
-    ELSE 'other' END`;
-
-const NULL_MEDIA = MEDIA_COLS.map(() => 'NULL').join(',');
-
-// 会话内全部消息：归属以 message.bot_id 为准（入站时由 botd 直接写入）。
-// - in  ：用户私聊侧（chat_id=user_id，排除转发到管理员侧的副本），并按 forward_map 打转发标记
-// - out ：后台/管理员回复（message_log，sender_id=0）
+// 单个会话的全部消息（in=用户上行，out=管理员/后台回复）。
+// 入站按 forward_map 现打「已转发」标记（只作展示，不参与归属）。
 const CONVERSATION_SQL = `
-    SELECT m.id AS db_id, m.chat_id, m.id AS tg_msg_id, 'in' AS direction,
-           m.user_id AS sender_id, ${TYPE_CASE} AS msg_type,
-           COALESCE(m.text, m.caption) AS text_content, m.date AS created_at,
-           EXISTS (SELECT 1 FROM forward_map fm
-                    WHERE fm.user_id = m.chat_id AND fm.original_msg_id = m.id) AS forwarded,
-           ${MEDIA_COLS.map((c) => `m.${c}`).join(',')}
-      FROM message m
-     WHERE m.bot_id = ? AND m.user_id = ? AND m.chat_id = m.user_id
-    UNION
-    SELECT ml.id, 0, ml.message_id,
-           ml.direction COLLATE utf8mb4_unicode_520_ci,
+    SELECT ml.id AS db_id,
+           ml.message_id AS tg_msg_id,
+           ml.direction,
            ml.sender_id,
-           ml.msg_type COLLATE utf8mb4_unicode_520_ci,
-           ml.text_content COLLATE utf8mb4_unicode_520_ci,
+           ml.msg_type,
+           ml.text_content,
            ml.created_at,
-           0,
-           ${NULL_MEDIA}
+           ml.raw_content,
+           CASE WHEN ml.direction = 'in' AND EXISTS (
+                  SELECT 1 FROM forward_map fm
+                   WHERE fm.bot_name = ml.bot_name
+                     AND fm.user_id  = ml.user_id
+                     AND fm.original_msg_id = ml.message_id)
+                THEN 1 ELSE 0 END AS forwarded
       FROM message_log ml
-     WHERE ml.bot_id = ? AND ml.user_id = ? AND ml.sender_id = 0
- `;
+     WHERE ml.bot_id = ? AND ml.user_id = ?
+`;
 
 function decorate(row, botId) {
-  const mediaRow = {};
-  for (const c of MEDIA_COLS) mediaRow[c] = row[c];
-  const media = parseMedia(mediaRow);
+  const media = parseMedia(parseRaw(row.raw_content));
   const out = {
     db_id: row.db_id,
     tg_msg_id: row.tg_msg_id,
@@ -91,17 +71,14 @@ router.get('/conversations', requirePerm('message:view'), async (req, res, next)
       params.push(`%${keyword}%`, `%${keyword}%`, `%${keyword}%`);
     }
 
+    // 聚合直接来自 message_log，一次查询拿到条数与最近时间（消除旧的 N+1）。
     const rows = await query(
-      `SELECT b.id AS bot_id, b.bot_name, g.user_id,
+      `SELECT b.id AS bot_id, b.bot_name, g.user_id, g.msg_count, g.last_at,
               u.username, u.first_name, u.last_name
          FROM (
-           SELECT bot_id, user_id, MAX(created_at) AS last_at FROM (
-             SELECT m.bot_id, m.user_id, m.date AS created_at
-               FROM message m WHERE m.bot_id IS NOT NULL AND m.chat_id = m.user_id
-             UNION ALL
-             SELECT ml.bot_id, ml.user_id, ml.created_at
-               FROM message_log ml WHERE ml.sender_id = 0
-           ) x GROUP BY bot_id, user_id
+           SELECT bot_id, user_id, COUNT(*) AS msg_count, MAX(created_at) AS last_at
+             FROM message_log
+            GROUP BY bot_id, user_id
          ) g
          JOIN bots b ON b.id = g.bot_id
          LEFT JOIN user u ON u.id = g.user_id
@@ -111,15 +88,8 @@ router.get('/conversations', requirePerm('message:view'), async (req, res, next)
     );
 
     for (const c of rows) {
-      const stat = await one(
-        `SELECT COUNT(*) AS cnt, MAX(t.created_at) AS last_at FROM (${CONVERSATION_SQL}) t`,
-        [c.bot_id, c.user_id, c.bot_id, c.user_id]
-      );
-      c.msg_count = stat.cnt;
-      c.last_at = stat.last_at;
       c.avatar_url = `/server/api/avatar/${c.user_id}?bot_id=${c.bot_id}`;
     }
-    rows.sort((a, b) => (b.last_at || '').localeCompare(a.last_at || ''));
     res.json(rows);
   } catch (e) { next(e); }
 });
@@ -135,12 +105,13 @@ router.get('/history', requirePerm('message:view'), async (req, res, next) => {
 
     const rows = await query(
       `SELECT t.* FROM (${CONVERSATION_SQL}) t ORDER BY t.created_at, t.db_id`,
-      [bot_id, user_id, bot_id, user_id]
+      [bot_id, user_id]
     );
 
+    // 唯一键已保证不重复；保留一层防御性去重（按方向+TG消息id）。
     const seen = new Set();
     const deduped = rows.filter((r) => {
-      const key = `${r.direction}-${r.sender_id}-${r.tg_msg_id}-${r.created_at}`;
+      const key = `${r.direction}-${r.tg_msg_id}`;
       if (seen.has(key)) return false;
       seen.add(key);
       return true;

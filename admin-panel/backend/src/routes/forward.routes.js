@@ -61,20 +61,13 @@ router.get('/records', requirePerm('forward:view'), async (req, res, next) => {
     if (bot_id) { where.push('b.id = ?'); params.push(bot_id); }
 
     // forward_map 同一条原消息转发给多个管理员会产生多行，
-    // 按 (bot_name,user_id,original_msg_id) 取最早一条转发记录代表
+    // 按 (bot_name,user_id,original_msg_id) 取最早一条转发记录代表。
+    // 内容统一取 message_log（方案A，带 bot 维度，不再 JOIN Longman message）。
     const rows = await query(
       `SELECT t.bot_name, t.bot_id, t.user_id,
               t.original_msg_id, t.forwarded_msg_id, fm.created_at,
               u.username, u.first_name, u.last_name,
-              m.text, m.caption, m.photo, m.sticker,
-              CASE
-                WHEN m.photo IS NOT NULL THEN 'photo'
-                WHEN m.sticker IS NOT NULL THEN 'sticker'
-                WHEN m.video IS NOT NULL THEN 'video'
-                WHEN m.voice IS NOT NULL THEN 'voice'
-                WHEN m.document IS NOT NULL THEN 'document'
-                WHEN m.text IS NOT NULL THEN 'text'
-                ELSE 'other' END AS msg_type
+              ml.msg_type, ml.text_content, ml.raw_content
          FROM (
            SELECT f.bot_name, f.user_id, f.original_msg_id,
                   MIN(f.forwarded_msg_id) AS forwarded_msg_id,
@@ -86,30 +79,36 @@ router.get('/records', requirePerm('forward:view'), async (req, res, next) => {
             GROUP BY f.bot_name, b.id, f.user_id, f.original_msg_id
          ) t
          JOIN forward_map fm ON fm.id = t.min_id
-         LEFT JOIN message m ON m.chat_id = t.user_id AND m.id = t.original_msg_id
+         LEFT JOIN message_log ml
+           ON ml.bot_id = t.bot_id AND ml.user_id = t.user_id
+          AND ml.message_id = t.original_msg_id AND ml.direction = 'in'
          LEFT JOIN user u ON u.id = t.user_id
         ORDER BY fm.created_at DESC
         LIMIT 20`,
       bot_id ? [...params, bot_id] : params
     );
 
-    // 取图片/贴纸 file_id 用于缩略图
+    // 取图片/贴纸 file_id 用于缩略图（raw_content 为标准 TG message JSON）
     for (const r of rows) {
-      r.content = r.text || r.caption || null;
+      r.content = r.text_content || null;
       r.thumb_file_id = null;
-      const raw = r.photo || r.sticker;
-      if (raw) {
+      if (r.raw_content) {
         try {
-          const arr = JSON.parse(raw);
-          if (Array.isArray(arr) && arr.length) {
-            r.thumb_file_id = arr[Math.min(1, arr.length - 1)].file_id;
-          } else if (arr.file_id) {
-            r.thumb_file_id = arr.thumbnail?.file_id || arr.file_id;
+          const g = JSON.parse(r.raw_content);
+          const photo = Array.isArray(g.photo) ? g.photo : null;
+          const sticker = g.sticker;
+          const video = g.video || g.animation;
+          if (photo && photo.length) {
+            r.thumb_file_id = photo[Math.min(1, photo.length - 1)].file_id;
+          } else if (sticker) {
+            r.thumb_file_id = sticker.thumbnail?.file_id || sticker.file_id;
+          } else if (video) {
+            r.thumb_file_id = video.thumb?.file_id || null;
           }
         } catch { /* ignore */ }
       }
       r.avatar_url = `/server/api/avatar/${r.user_id}?bot_id=${r.bot_id}`;
-      delete r.text; delete r.caption; delete r.photo; delete r.sticker;
+      delete r.text_content; delete r.raw_content;
     }
     res.json(rows);
   } catch (e) { next(e); }

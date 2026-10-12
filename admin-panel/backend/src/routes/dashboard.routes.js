@@ -13,16 +13,13 @@ router.get('/', requirePerm('dashboard:view'), async (req, res, next) => {
     const [botRow, userRow, msgRow, fwdRow, runRow] = await Promise.all([
       query(`SELECT COUNT(*) AS c FROM bots b WHERE ${scope.where}`, scope.params),
       query(
-        `SELECT COUNT(DISTINCT uv.user_id) AS c
-           FROM user_verification uv JOIN bots b ON b.bot_name = uv.bot_name
+        `SELECT COUNT(DISTINCT g.user_id) AS c
+           FROM message_log g JOIN bots b ON b.id = g.bot_id
           WHERE ${scope.where}`, scope.params),
       query(
-        `SELECT COUNT(DISTINCT m.id) AS c
-           FROM message m
-           JOIN (SELECT DISTINCT bot_name,user_id,original_msg_id FROM forward_map) f
-             ON f.user_id = m.chat_id AND f.original_msg_id = m.id
-           JOIN bots b ON b.bot_name = f.bot_name
-          WHERE ${scope.where}`, scope.params),
+        `SELECT COUNT(*) AS c
+           FROM message_log g JOIN bots b ON b.id = g.bot_id
+          WHERE ${scope.where} AND g.direction = 'in'`, scope.params),
       query(
         `SELECT COUNT(*) AS c FROM forward_map f JOIN bots b ON b.bot_name = f.bot_name
           WHERE ${scope.where}`, scope.params),
@@ -65,30 +62,16 @@ router.get('/status', requirePerm('dashboard:view'), async (req, res, next) => {
 router.get('/trend', requirePerm('dashboard:view'), async (req, res, next) => {
   try {
     const scope = botScopeFilter(req.ctx, 'b');
-    // 与历史消息同一口径：用户上行=原消息关联 forward_map；
-    // 管理员回复=回复消息经 reply_to_message 关联 forward_map 的 forwarded_msg_id
+    // 与历史消息同一口径（message_log）：in=用户上行，out=管理员回复。
     const data = await query(
-      `SELECT DATE(t.created_at) AS day,
-              SUM(t.direction = 'in')  AS inbound,
-              SUM(t.direction = 'out') AS outbound
-         FROM (
-           SELECT m.date AS created_at, 'in' AS direction
-             FROM message m
-             JOIN (SELECT DISTINCT bot_name,user_id,original_msg_id FROM forward_map) f
-               ON f.user_id = m.chat_id AND f.original_msg_id = m.id
-             JOIN bots b ON b.bot_name = f.bot_name
-            WHERE ${scope.where}
-           UNION ALL
-           SELECT m.date, 'out'
-             FROM message m
-             JOIN (SELECT DISTINCT bot_name,forwarded_msg_id FROM forward_map) f
-               ON f.forwarded_msg_id = m.reply_to_message
-             JOIN bots b ON b.bot_name = f.bot_name
-            WHERE ${scope.where}
-         ) t
-        WHERE t.created_at >= DATE_SUB(CURDATE(), INTERVAL 29 DAY)
-        GROUP BY DATE(t.created_at) ORDER BY day`,
-      [...scope.params, ...scope.params]
+      `SELECT DATE(g.created_at) AS day,
+              SUM(g.direction = 'in')  AS inbound,
+              SUM(g.direction = 'out') AS outbound
+         FROM message_log g JOIN bots b ON b.id = g.bot_id
+        WHERE ${scope.where}
+          AND g.created_at >= DATE_SUB(CURDATE(), INTERVAL 29 DAY)
+        GROUP BY DATE(g.created_at) ORDER BY day`,
+      scope.params
     );
 
     // 补齐近 7 天无数据的日期，图表才连续
