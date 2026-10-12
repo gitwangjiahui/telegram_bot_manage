@@ -13,13 +13,13 @@ router.get('/', requirePerm('dashboard:view'), async (req, res, next) => {
     const [botRow, userRow, msgRow, fwdRow, runRow] = await Promise.all([
       query(`SELECT COUNT(*) AS c FROM bots b WHERE ${scope.where}`, scope.params),
       query(
-        `SELECT COUNT(DISTINCT g.user_id) AS c
-           FROM message_log g JOIN bots b ON b.id = g.bot_id
+        `SELECT COUNT(DISTINCT uv.user_id) AS c
+           FROM user_verification uv JOIN bots b ON b.bot_name = uv.bot_name
           WHERE ${scope.where}`, scope.params),
       query(
         `SELECT COUNT(*) AS c
            FROM message_log g JOIN bots b ON b.id = g.bot_id
-          WHERE ${scope.where} AND g.direction = 'in'`, scope.params),
+          WHERE ${scope.where}`, scope.params),
       query(
         `SELECT COUNT(*) AS c FROM forward_map f JOIN bots b ON b.bot_name = f.bot_name
           WHERE ${scope.where}`, scope.params),
