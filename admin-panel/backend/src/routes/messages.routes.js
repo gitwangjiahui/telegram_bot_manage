@@ -36,7 +36,7 @@ const CONVERSATION_SQL = `
 `;
 
 function decorate(row, botId) {
-  const media = parseMedia(parseRaw(row.raw_content));
+  const media = parseMedia(parseRaw(row.raw_content) || {});
   const out = {
     db_id: row.db_id,
     tg_msg_id: row.tg_msg_id,
