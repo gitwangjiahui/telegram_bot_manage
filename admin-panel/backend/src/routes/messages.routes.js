@@ -25,6 +25,7 @@ const CONVERSATION_SQL = `
            ml.text_content,
            ml.created_at,
            ml.raw_content,
+           ml.is_verified,
            sa.first_name AS sender_first_name,
            sa.username   AS sender_username,
            CASE WHEN ml.direction = 'in' AND EXISTS (
@@ -40,7 +41,7 @@ const CONVERSATION_SQL = `
 
 function decorate(row, botId) {
   const media = parseMedia(parseRaw(row.raw_content) || {});
-  // 回复人：历史回复 sender_id 是 TG 客服（join admins）；web/Go 新回复 sender_id=0。
+  // 回复人：历史/转发回复 sender_id 是管理员 TG id（join admins）；web/Go 后台回复 sender_id=0。
   let senderName = null;
   if (row.direction === 'out') {
     senderName = row.sender_first_name || row.sender_username
@@ -55,6 +56,7 @@ function decorate(row, botId) {
     msg_type: row.msg_type,
     text_content: row.text_content,
     created_at: row.created_at,
+    is_verified: Number(row.is_verified) === 1,
     forwarded: Number(row.forwarded) === 1,
     media: media ? {
       ...media,
@@ -83,10 +85,13 @@ router.get('/conversations', requirePerm('message:view'), async (req, res, next)
 
     // 聚合直接来自 message_log，一次查询拿到条数与最近时间（消除旧的 N+1）。
     const rows = await query(
-      `SELECT b.id AS bot_id, b.bot_name, g.user_id, g.msg_count, g.last_at,
+      `SELECT b.id AS bot_id, b.bot_name, g.user_id, g.msg_count, g.unverified_count, g.last_at,
               u.username, u.first_name, u.last_name
          FROM (
-           SELECT bot_id, user_id, COUNT(*) AS msg_count, MAX(created_at) AS last_at
+           SELECT bot_id, user_id,
+                  COUNT(*) AS msg_count,
+                  SUM(CASE WHEN is_verified = 0 THEN 1 ELSE 0 END) AS unverified_count,
+                  MAX(created_at) AS last_at
              FROM message_log
             GROUP BY bot_id, user_id
          ) g
@@ -99,6 +104,7 @@ router.get('/conversations', requirePerm('message:view'), async (req, res, next)
 
     for (const c of rows) {
       c.avatar_url = `/server/api/avatar/${c.user_id}?bot_id=${c.bot_id}`;
+      c.unverified_count = Number(c.unverified_count) || 0;
     }
     res.json(rows);
   } catch (e) { next(e); }

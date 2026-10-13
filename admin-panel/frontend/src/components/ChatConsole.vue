@@ -21,6 +21,8 @@
           <div class="conv-info">
             <div class="conv-name">
               {{ c.first_name || c.username || c.user_id }}
+              <el-tag v-if="c.unverified_count > 0" size="small" type="warning" effect="dark"
+                      style="margin-left: 4px">未验证 {{ c.unverified_count }}</el-tag>
               <el-tag v-if="!fixedBot" size="small" effect="plain" style="margin-left: 4px">{{ c.bot_name }}</el-tag>
             </div>
             <div class="conv-meta">
@@ -66,7 +68,8 @@
                    :class="{ 'has-media': m.media }">{{ m.text_content }}</div>
               <div v-if="!m.text_content && !m.media" class="bubble-text">[非文本消息]</div>
               <div class="bubble-meta">
-                <span v-if="m.direction === 'in'" class="fwd-tag"
+                <span v-if="m.direction === 'in' && !m.is_verified" class="fwd-tag unverified">未验证</span>
+                <span v-if="m.direction === 'in' && m.is_verified" class="fwd-tag"
                       :class="{ on: m.forwarded, busy: m._fwdBusy }">
                   <span v-if="m._fwdBusy" class="fwd-spin" />
                   <a v-else-if="!m.forwarded" class="fwd-link" @click.stop="forwardOne(m)">转发</a>
@@ -377,6 +380,7 @@ onMounted(async () => {
   background: rgba(0,0,0,0.06); color: #909399;
 }
 .fwd-tag.on { background: rgba(42,171,238,0.14); color: #1d8ec4; }
+.fwd-tag.unverified { background: rgba(230,162,60,0.16); color: #b8860b; }
 .fwd-tag.busy { background: rgba(0,0,0,0.06); color: #909399; display: inline-flex; align-items: center; gap: 4px; }
 .fwd-link { cursor: pointer; color: #409eff; }
 .fwd-link:hover { text-decoration: underline; }
