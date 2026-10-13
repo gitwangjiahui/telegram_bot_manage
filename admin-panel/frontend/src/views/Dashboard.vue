@@ -310,11 +310,11 @@ onUnmounted(() => timer && clearInterval(timer));
 /* 面板 */
 .panel { background: #fff; border-radius: 10px; padding: 16px 18px; box-shadow: 0 1px 4px rgba(0,0,0,.06); }
 
-/* 两栏栅格：强制同行面板等宽、等高、底边对齐 */
+/* 两栏栅格：grid 默认 stretch 使同行卡片盒子等高等宽、底边对齐；
+   内容顶部对齐，不做内部 flex:1 填充（固定高度图表被拉伸会溢出压到下方卡片） */
 .grid-split { display: grid; grid-template-columns: 14fr 10fr; gap: 14px; align-items: stretch; }
 .grid-rank { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; align-items: stretch; }
-.grid-split > .panel, .grid-rank > .panel { height: 100%; margin: 0; min-width: 0; display: flex; flex-direction: column; overflow: hidden; }
-.grid-split .hour-chart, .grid-rank .rank-list { flex: 1; }
+.grid-split > .panel, .grid-rank > .panel { margin: 0; min-width: 0; }
 @media (max-width: 992px) {
   .grid-split, .grid-rank { grid-template-columns: 1fr; }
 }
