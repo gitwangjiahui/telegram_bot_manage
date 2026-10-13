@@ -69,7 +69,7 @@
               <div v-if="!m.text_content && !m.media" class="bubble-text">[非文本消息]</div>
               <div class="bubble-meta">
                 <span v-if="m.direction === 'in' && !m.is_verified" class="fwd-tag unverified">未验证</span>
-                <span v-if="m.direction === 'in' && m.is_verified" class="fwd-tag"
+                <span v-if="m.direction === 'in'" class="fwd-tag"
                       :class="{ on: m.forwarded, busy: m._fwdBusy }">
                   <span v-if="m._fwdBusy" class="fwd-spin" />
                   <a v-else-if="!m.forwarded" class="fwd-link" @click.stop="forwardOne(m)">转发</a>
