@@ -21,8 +21,10 @@
           <div class="conv-info">
             <div class="conv-name">
               {{ c.first_name || c.username || c.user_id }}
-              <el-tag v-if="c.pending_count > 0" size="small" type="warning" effect="dark"
-                      style="margin-left: 4px">待处理 {{ c.pending_count }}</el-tag>
+              <el-tag v-if="!c.is_verified_user" size="small" type="warning" effect="plain"
+                      style="margin-left: 4px">未验证</el-tag>
+              <el-tag v-if="c.unforwarded_count > 0" size="small" type="danger" effect="dark"
+                      style="margin-left: 4px">未转发 {{ c.unforwarded_count }}</el-tag>
               <el-tag v-if="!fixedBot" size="small" effect="plain" style="margin-left: 4px">{{ c.bot_name }}</el-tag>
             </div>
             <div class="conv-meta">
