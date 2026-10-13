@@ -129,6 +129,20 @@ router.get('/metrics', requirePerm('dashboard:view'), async (req, res, next) => 
       FROM user_verification uv JOIN bots b ON b.bot_name = uv.bot_name
       WHERE ${scope.where}`;
 
+    // 今日入站处理漏斗：转发（forward_map EXISTS 权威口径，与 history 一致）/ 验证
+    const funnelSQL = `
+      SELECT
+        SUM(g.direction='in')                                          AS in_total,
+        SUM(g.direction='in' AND g.is_verified=1)                      AS in_verified,
+        SUM(g.direction='in' AND g.is_verified=0)                      AS in_unverified,
+        SUM(g.direction='in' AND EXISTS (
+              SELECT 1 FROM forward_map fm
+               WHERE fm.bot_name = g.bot_name COLLATE utf8mb4_unicode_ci
+                 AND fm.user_id  = g.user_id
+                 AND fm.original_msg_id = g.message_id))               AS in_forwarded
+      FROM message_log g JOIN bots b ON b.id = g.bot_id
+      WHERE ${scope.where} AND g.created_at >= CURDATE()`;
+
     const botSQL = `
       SELECT COUNT(*) AS bots,
              SUM(CASE WHEN ${FRESH} THEN 1 ELSE 0 END) AS running
@@ -230,12 +244,13 @@ router.get('/metrics', requirePerm('dashboard:view'), async (req, res, next) => 
 
     const [
       kpi, fwd, usr, bt, liveRows, hourRows, trendRows,
-      typeRows, byBotRows, adminRows, userTopRows, convTotal, convReply,
+      typeRows, byBotRows, adminRows, userTopRows, convTotal, convReply, funnel,
     ] = await Promise.all([
       query(kpiSQL, P), query(fwdSQL, P), query(userSQL, P), query(botSQL, P),
       query(liveSQL, P), query(hourlySQL, P), query(trendSQL, P),
       query(typeSQL, P), query(byBotSQL, P), query(adminSQL, P),
       query(userTopSQL, P), query(convTotalSQL, P), query(convReplySQL, P),
+      query(funnelSQL, P),
     ]);
 
     // 24 小时补零
@@ -260,6 +275,10 @@ router.get('/metrics', requirePerm('dashboard:view'), async (req, res, next) => 
     const todayOut = Number(k.today_out) || 0;
     const convTot = Number(convTotal[0].c) || 0;
     const convRep = Number(convReply[0].c) || 0;
+    const fn = funnel[0] || {};
+    const fnIn = Number(fn.in_total) || 0;
+    const fnFwd = Number(fn.in_forwarded) || 0;
+    const fnVer = Number(fn.in_verified) || 0;
 
     res.json({
       server_time: new Date().toISOString(),
@@ -283,6 +302,11 @@ router.get('/metrics', requirePerm('dashboard:view'), async (req, res, next) => 
         reply_rate: todayIn ? +(todayOut / todayIn * 100).toFixed(1) : 0,
         yday_in: Number(k.yday_in) || 0,
         yday_out: Number(k.yday_out) || 0,
+        in_total: fnIn,
+        forwarded: fnFwd,
+        unforwarded: fnIn - fnFwd,
+        verified: fnVer,
+        unverified: fnIn - fnVer,
       },
       conversation: { total: convTot, replied: convRep, rate: convTot ? +(convRep / convTot * 100).toFixed(1) : 0 },
       live: liveRows.map((r) => ({

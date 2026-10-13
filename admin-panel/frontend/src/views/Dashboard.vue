@@ -156,7 +156,7 @@
 <script setup>
 import { computed, onMounted, onUnmounted, reactive, ref } from 'vue';
 import {
-  Refresh, Monitor, User, ChatDotRound, Promotion, CircleCheck, Warning,
+  Refresh, Monitor, User, ChatDotRound, Promotion, CircleCheck, Warning, Finished, Select,
 } from '@element-plus/icons-vue';
 import api from '../api';
 
@@ -195,6 +195,15 @@ const kpiCards = computed(() => {
       sub: `回复率 ${td.reply_rate ?? 0}%` },
     { key: 'fwd', icon: Promotion, label: '累计转发', val: t.forwards ?? 0, ...NEUTRAL,
       sub: td.forwards ? `今日 ${td.forwards}` : '今日 0' },
+    { key: 'tfwd', icon: Finished, label: '今日转发', val: td.forwarded ?? 0, ...NEUTRAL,
+      sub: `未转发 ${td.unforwarded ?? 0}`,
+      subCls: (td.unforwarded ?? 0) > 0 ? 'warn' : '',
+      valueColor: (td.unforwarded ?? 0) > 0 ? '#1f2733' : undefined },
+    { key: 'tver', icon: Select, label: '今日验证', val: td.verified ?? 0,
+      ...((td.unverified ?? 0) > 0 ? ORANGE : NEUTRAL),
+      sub: `未验证 ${td.unverified ?? 0}`,
+      subCls: (td.unverified ?? 0) > 0 ? 'warn' : '',
+      valueColor: (td.unverified ?? 0) > 0 ? '#d98e2b' : undefined },
     { key: 'unv', icon: Warning, label: '未验证留痕', val: t.unverified ?? 0,
       ...(t.unverified > 0 ? ORANGE : NEUTRAL),
       sub: t.unverified ? '含历史广告' : '', valueColor: t.unverified > 0 ? '#d98e2b' : undefined },
@@ -274,11 +283,11 @@ onUnmounted(() => timer && clearInterval(timer));
 /* KPI 卡片：纵向布局，整齐栅格，标签不换行，无左色条（异常仅用数字/图标色表达） */
 .kpi-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(5, 1fr);
   gap: 14px;
 }
-@media (min-width: 1700px) {
-  .kpi-grid { grid-template-columns: repeat(8, 1fr); }
+@media (max-width: 1100px) {
+  .kpi-grid { grid-template-columns: repeat(2, 1fr); }
 }
 .kpi-card {
   position: relative;
@@ -306,6 +315,7 @@ onUnmounted(() => timer && clearInterval(timer));
 .kpi-sub.placeholder { color: transparent; }
 .kpi-sub.up { color: #3fae63; }
 .kpi-sub.down { color: #e05b5b; }
+.kpi-sub.warn { color: #d98e2b; }
 
 /* 面板 */
 .panel { background: #fff; border-radius: 10px; padding: 16px 18px; box-shadow: 0 1px 4px rgba(0,0,0,.06); }
