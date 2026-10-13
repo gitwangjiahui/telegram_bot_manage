@@ -86,6 +86,7 @@ function onCommand(cmd) {
   align-items: center;
   justify-content: space-between;
   border-bottom: 1px solid #e6e6e6;
+  padding: 0 16px;
 }
 .title { font-size: 16px; font-weight: 600; }
 .user-info {

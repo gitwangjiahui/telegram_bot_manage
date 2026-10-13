@@ -259,7 +259,7 @@ onUnmounted(() => timer && clearInterval(timer));
 .dash {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 20px;
   padding: 16px;
 }
 
