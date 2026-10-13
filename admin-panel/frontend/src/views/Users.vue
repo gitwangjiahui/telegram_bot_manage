@@ -15,17 +15,17 @@
       </div>
 
       <el-table :data="list" stripe v-loading="loading">
-        <el-table-column prop="user_id" label="TG 用户 ID" width="140" />
-        <el-table-column label="用户名" width="140">
+        <el-table-column prop="user_id" label="TG 用户 ID" width="140" show-overflow-tooltip />
+        <el-table-column label="用户名" width="140" show-overflow-tooltip>
           <template #default="{ row }">{{ row.username ? '@' + row.username : '无' }}</template>
         </el-table-column>
-        <el-table-column label="姓名">
+        <el-table-column label="姓名" min-width="140" show-overflow-tooltip>
           <template #default="{ row }">
             {{ [row.first_name, row.last_name].filter(Boolean).join(' ') || '无' }}
           </template>
         </el-table-column>
-        <el-table-column prop="bot_name" label="所属机器人" width="120" />
-        <el-table-column prop="verified_at" label="验证时间" width="180" />
+        <el-table-column prop="bot_name" label="所属机器人" width="120" show-overflow-tooltip />
+        <el-table-column prop="verified_at" label="验证时间" width="180" show-overflow-tooltip />
         <el-table-column label="操作" width="130">
           <template #default="{ row }">
             <el-popconfirm title="取消验证？用户需重新验证" @confirm="resetVerify(row)">
@@ -52,7 +52,7 @@
       <el-table :data="adminList" stripe style="margin-top: 12px">
         <el-table-column prop="bot_name" label="机器人" width="110" />
         <el-table-column prop="admin_id" label="TG ID" width="140" />
-        <el-table-column label="用户名/姓名">
+        <el-table-column label="用户名/姓名" show-overflow-tooltip>
           <template #default="{ row }">
             {{ row.username ? '@' + row.username : [row.first_name, row.last_name].filter(Boolean).join(' ') }}
           </template>

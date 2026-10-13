@@ -55,8 +55,9 @@
             </div>
           </template>
         </el-table-column>
-        <el-table-column prop="bot_name" label="机器人" width="90" />
-        <el-table-column label="消息内容" min-width="260">
+        <el-table-column prop="bot_name" label="机器人" width="90" show-overflow-tooltip />
+        <el-table-column prop="original_msg_id" label="消息 ID" width="100" show-overflow-tooltip />
+        <el-table-column label="消息内容" min-width="260" show-overflow-tooltip>
           <template #default="{ row }">
             <div class="content-cell">
               <el-image v-if="row.thumb_file_id" class="thumb"
@@ -64,12 +65,12 @@
                 :preview-src-list="[`/server/api/media/${row.bot_id}?file_id=${row.thumb_file_id}&type=${row.msg_type}`]"
                 preview-teleported fit="cover" />
               <el-tag v-if="row.msg_type && row.msg_type !== 'text'" size="small" type="info"
-                      style="margin-right: 6px">{{ typeNames[row.msg_type] || row.msg_type }}</el-tag>
+                      style="margin-right: 6px; flex: none">{{ typeNames[row.msg_type] || row.msg_type }}</el-tag>
               <span class="content-text">{{ row.content || (row.msg_type === 'text' ? '' : '非文本消息') }}</span>
             </div>
           </template>
         </el-table-column>
-        <el-table-column prop="created_at" label="转发时间" width="170" />
+        <el-table-column prop="created_at" label="转发时间" width="170" show-overflow-tooltip />
       </el-table>
     </el-card>
   </div>
@@ -134,11 +135,10 @@ onMounted(load);
 .user-cell { display: flex; align-items: center; gap: 10px; }
 .user-name { font-weight: 600; font-size: 14px; color: #303133; }
 .user-sub { font-size: 12px; color: #909399; display: flex; gap: 10px; margin-top: 2px; }
-.content-cell { display: flex; align-items: center; gap: 8px; }
+.content-cell { display: flex; align-items: center; gap: 8px; white-space: nowrap; overflow: hidden; }
 .thumb { width: 46px; height: 46px; border-radius: 6px; flex-shrink: 0; }
 .content-text {
   color: #303133; font-size: 13px;
-  overflow: hidden; text-overflow: ellipsis;
-  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 </style>

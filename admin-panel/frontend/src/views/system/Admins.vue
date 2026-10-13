@@ -6,8 +6,8 @@
       </div>
       <el-table :data="list" stripe v-loading="loading">
         <el-table-column prop="id" label="ID" width="70" />
-        <el-table-column prop="username" label="账号" width="160" />
-        <el-table-column prop="real_name" label="姓名" width="160" />
+        <el-table-column prop="username" label="账号" width="160" show-overflow-tooltip />
+        <el-table-column prop="real_name" label="姓名" width="160" show-overflow-tooltip />
         <el-table-column label="角色">
           <template #default="{ row }">
             <el-tag v-for="r in row.roles" :key="r.id" style="margin-right: 6px">

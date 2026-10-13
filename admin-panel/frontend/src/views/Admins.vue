@@ -23,12 +23,12 @@
             </el-avatar>
           </template>
         </el-table-column>
-        <el-table-column label="昵称" min-width="140">
+        <el-table-column label="昵称" min-width="140" show-overflow-tooltip>
           <template #default="{ row }">
             {{ [row.first_name, row.last_name].filter(Boolean).join(' ') || '—' }}
           </template>
         </el-table-column>
-        <el-table-column label="用户名" width="140">
+        <el-table-column label="用户名" width="140" show-overflow-tooltip>
           <template #default="{ row }">
             <el-link v-if="row.username" type="primary"
                      :href="`https://t.me/${row.username}`" target="_blank">

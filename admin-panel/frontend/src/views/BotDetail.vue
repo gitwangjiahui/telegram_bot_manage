@@ -76,16 +76,17 @@
                 </div>
               </template>
             </el-table-column>
-            <el-table-column label="内容" min-width="220">
+            <el-table-column prop="original_msg_id" label="消息 ID" width="90" show-overflow-tooltip />
+            <el-table-column label="内容" min-width="220" show-overflow-tooltip>
               <template #default="{ row }">
-                <div class="user-cell">
+                <div class="content-cell">
                   <el-image v-if="row.thumb_file_id" class="thumb"
                             :src="mediaUrl(row.thumb_file_id, row.msg_type)" />
-                  <span>{{ row.content || (row.msg_type === 'text' ? '' : '非文本') }}</span>
+                  <span class="content-text">{{ row.content || (row.msg_type === 'text' ? '' : '非文本') }}</span>
                 </div>
               </template>
             </el-table-column>
-            <el-table-column prop="created_at" label="时间" width="170" />
+            <el-table-column prop="created_at" label="时间" width="170" show-overflow-tooltip />
           </el-table>
         </el-tab-pane>
 
@@ -224,7 +225,9 @@ onBeforeUnmount(() => { busyOff?.(); });
 .muted { color: #909399; font-size: 12px; }
 .add-row { display: flex; gap: 10px; }
 .user-cell { display: flex; gap: 8px; align-items: center; }
-.thumb { width: 40px; height: 40px; border-radius: 5px; }
+.content-cell { display: flex; gap: 8px; align-items: center; white-space: nowrap; overflow: hidden; }
+.content-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.thumb { width: 40px; height: 40px; border-radius: 5px; flex: none; }
 .role { font-size: 11px; }
 
 .chat-console-wrap {

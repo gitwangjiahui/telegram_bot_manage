@@ -272,7 +272,7 @@ onUnmounted(() => timer && clearInterval(timer));
   grid-template-columns: repeat(4, 1fr);
   gap: 14px;
 }
-@media (min-width: 1500px) {
+@media (min-width: 1700px) {
   .kpi-grid { grid-template-columns: repeat(8, 1fr); }
 }
 .kpi-card {
@@ -308,7 +308,7 @@ onUnmounted(() => timer && clearInterval(timer));
 /* 两栏栅格：强制同行面板等宽、等高、底边对齐 */
 .grid-split { display: grid; grid-template-columns: 14fr 10fr; gap: 14px; margin-top: 14px; align-items: stretch; }
 .grid-rank { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 14px; align-items: stretch; }
-.grid-split > .panel, .grid-rank > .panel { height: 100%; margin: 0; min-width: 0; display: flex; flex-direction: column; }
+.grid-split > .panel, .grid-rank > .panel { height: 100%; margin: 0; min-width: 0; display: flex; flex-direction: column; overflow: hidden; }
 .grid-split .hour-chart, .grid-rank .rank-list { flex: 1; }
 @media (max-width: 992px) {
   .grid-split, .grid-rank { grid-template-columns: 1fr; }

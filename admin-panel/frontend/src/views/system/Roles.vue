@@ -6,9 +6,9 @@
       </div>
       <el-table :data="list" stripe v-loading="loading">
         <el-table-column prop="id" label="ID" width="70" />
-        <el-table-column prop="role_code" label="角色编码" width="180" />
-        <el-table-column prop="role_name" label="角色名称" width="160" />
-        <el-table-column prop="description" label="描述" />
+        <el-table-column prop="role_code" label="角色编码" width="180" show-overflow-tooltip />
+        <el-table-column prop="role_name" label="角色名称" width="160" show-overflow-tooltip />
+        <el-table-column prop="description" label="描述" min-width="160" show-overflow-tooltip />
         <el-table-column label="数据范围" width="200">
           <template #default="{ row }">
             <el-tag v-if="row.bot_ids.length === 0" type="success">全部机器人</el-tag>
