@@ -13,10 +13,10 @@
 
     <!-- 核心 KPI -->
     <div class="kpi-grid">
-      <div v-for="c in kpiCards" :key="c.key" class="kpi-card" :class="c.tone">
+      <div v-for="c in kpiCards" :key="c.key" class="kpi-card">
         <div class="kpi-top">
           <span class="kpi-label">{{ c.label }}</span>
-          <span class="kpi-badge" :style="{ background: c.soft, color: c.color }">
+          <span class="kpi-badge" :style="{ background: c.badgeBg, color: c.badgeFg }">
             <el-icon :size="17"><component :is="c.icon" /></el-icon>
           </span>
         </div>
@@ -183,27 +183,35 @@ const kpiCards = computed(() => {
   const conv = m.conversation || {};
   const deltaIn = td.yday_in ? pctDelta(td.inbound, td.yday_in) : null;
   const rate = conv.rate ?? 0;
-  const soft = (hex) => hex + '1f'; // ~12% 透明
+
+  // 默认统一中性灰图标块；仅告警/异常类用语义色
+  const NEUTRAL = { badgeBg: '#f2f4f7', badgeFg: '#7b8496' };
+  const ORANGE = { badgeBg: '#fdf0dd', badgeFg: '#d98e2b' };
+  const RED = { badgeBg: '#fdeaea', badgeFg: '#e05b5b' };
+  const rateColor = rate >= 60 ? '#3fae63' : rate >= 40 ? '#d98e2b' : '#e05b5b';
+
   return [
-    { key: 'bots', icon: Monitor, color: '#3f8efc', label: '运行 Bot', val: `${t.running ?? 0}/${t.bots ?? 0}`,
-      tone: (t.running ?? 0) < (t.bots ?? 1) ? 'tone-danger' : 'tone-ok' },
-    { key: 'users', icon: User, color: '#4bbf6b', label: '已验证客户', val: t.verified_users ?? 0,
+    { key: 'bots', icon: Monitor, label: '运行 Bot', val: `${t.running ?? 0}/${t.bots ?? 0}`,
+      ...((t.running ?? 0) < (t.bots ?? 1) ? RED : NEUTRAL),
+      valueColor: (t.running ?? 0) < (t.bots ?? 1) ? '#e05b5b' : undefined },
+    { key: 'users', icon: User, label: '已验证客户', val: t.verified_users ?? 0, ...NEUTRAL,
       sub: td.new_users ? `今日新增 ${td.new_users}` : '' },
-    { key: 'in', icon: ChatDotRound, color: '#14b8a6', label: '今日上行', val: td.inbound ?? 0,
+    { key: 'in', icon: ChatDotRound, label: '今日上行', val: td.inbound ?? 0, ...NEUTRAL,
       sub: deltaIn != null ? `${deltaIn >= 0 ? '▲' : '▼'} ${Math.abs(deltaIn)}% 较昨日` : (td.yday_in ? '' : '昨日 0'),
       subCls: deltaIn >= 0 ? 'up' : 'down' },
-    { key: 'out', icon: Promotion, color: '#1f86c4', label: '今日回复', val: td.outbound ?? 0,
+    { key: 'out', icon: Promotion, label: '今日回复', val: td.outbound ?? 0, ...NEUTRAL,
       sub: `回复率 ${td.reply_rate ?? 0}%` },
-    { key: 'fwd', icon: Promotion, color: '#8a6df0', label: '累计转发', val: t.forwards ?? 0,
+    { key: 'fwd', icon: Promotion, label: '累计转发', val: t.forwards ?? 0, ...NEUTRAL,
       sub: td.forwards ? `今日 ${td.forwards}` : '今日 0' },
-    { key: 'unv', icon: Warning, color: '#e6a23c', label: '未验证留痕', val: t.unverified ?? 0,
-      sub: t.unverified ? '含历史广告' : '', valueColor: '#e6a23c',
-      tone: t.unverified > 0 ? 'tone-warn' : '' },
-    { key: 'msg', icon: CircleCheck, color: '#8a94a6', label: '归档总量', val: t.messages ?? 0, sub: '' },
-    { key: 'conv', icon: ChatDotRound, color: rate >= 60 ? '#4bbf6b' : rate >= 40 ? '#e6a23c' : '#f06868',
-      label: '会话回复率', val: rate + '%', sub: `${conv.replied ?? 0}/${conv.total ?? 0} 已回复`,
-      valueColor: rate >= 60 ? '#4bbf6b' : rate >= 40 ? '#e6a23c' : '#f06868' },
-  ].map((c) => ({ ...c, soft: soft(c.color) }));
+    { key: 'unv', icon: Warning, label: '未验证留痕', val: t.unverified ?? 0,
+      ...(t.unverified > 0 ? ORANGE : NEUTRAL),
+      sub: t.unverified ? '含历史广告' : '', valueColor: t.unverified > 0 ? '#d98e2b' : undefined },
+    { key: 'msg', icon: CircleCheck, label: '归档总量', val: t.messages ?? 0, ...NEUTRAL, sub: '' },
+    { key: 'conv', icon: ChatDotRound, label: '会话回复率', val: rate + '%',
+      badgeBg: rate >= 60 ? '#e7f6ec' : rate >= 40 ? '#fdf0dd' : '#fdeaea',
+      badgeFg: rateColor, valueColor: rateColor,
+      sub: `${conv.replied ?? 0}/${conv.total ?? 0} 已回复` },
+  ];
 });
 
 const typeRows = computed(() => m.by_type || []);
@@ -266,11 +274,14 @@ onUnmounted(() => timer && clearInterval(timer));
 .pulse.off { background: #f56c6c; box-shadow: none; animation: none; }
 @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(103,194,58,.5);} 70% { box-shadow: 0 0 0 7px rgba(103,194,58,0);} 100% { box-shadow: 0 0 0 0 rgba(103,194,58,0);} }
 
-/* KPI 卡片：纵向布局，自适应 grid，标签不换行 */
+/* KPI 卡片：纵向布局，整齐栅格，标签不换行，无左色条（异常仅用数字/图标色表达） */
 .kpi-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(158px, 1fr));
+  grid-template-columns: repeat(4, 1fr);
   gap: 14px;
+}
+@media (min-width: 1500px) {
+  .kpi-grid { grid-template-columns: repeat(8, 1fr); }
 }
 .kpi-card {
   position: relative;
@@ -286,14 +297,6 @@ onUnmounted(() => timer && clearInterval(timer));
   overflow: hidden;
 }
 .kpi-card:hover { transform: translateY(-2px); box-shadow: 0 8px 22px rgba(31,45,61,.12); }
-.kpi-card::before {
-  content: '';
-  position: absolute; inset: 0 auto 0 0; width: 3px;
-  background: transparent;
-}
-.kpi-card.tone-ok::before    { background: #4bbf6b; }
-.kpi-card.tone-warn::before  { background: #e6a23c; }
-.kpi-card.tone-danger::before{ background: #f06868; }
 .kpi-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .kpi-label { font-size: 13px; color: #8a94a6; white-space: nowrap; letter-spacing: .2px; }
 .kpi-badge {
@@ -304,8 +307,8 @@ onUnmounted(() => timer && clearInterval(timer));
 .kpi-foot { min-height: 16px; display: flex; align-items: center; }
 .kpi-sub { font-size: 12px; color: #a8b0bd; white-space: nowrap; }
 .kpi-sub.placeholder { color: transparent; }
-.kpi-sub.up { color: #4bbf6b; }
-.kpi-sub.down { color: #f06868; }
+.kpi-sub.up { color: #3fae63; }
+.kpi-sub.down { color: #e05b5b; }
 
 /* 面板 */
 .panel { background: #fff; border-radius: 10px; padding: 16px 18px; box-shadow: 0 1px 4px rgba(0,0,0,.06); }
