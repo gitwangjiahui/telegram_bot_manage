@@ -29,7 +29,7 @@
     </div>
 
     <!-- 实时 Bot 状态条 -->
-    <div class="panel" style="margin-top:14px">
+    <div class="panel">
       <div class="panel-title">Bot 实时运行</div>
       <div class="bot-grid">
         <div v-for="b in m.live" :key="b.bot_id" class="bot-card" :class="{ down: !b.is_running }">
@@ -106,7 +106,7 @@
     </div>
 
     <!-- 30 天趋势 -->
-    <div class="panel" style="margin-top:14px">
+    <div class="panel">
       <div class="panel-title">近 30 天消息趋势
         <span class="legend"><i class="sw in" />用户上行<i class="sw out" />管理员回复</span>
       </div>
@@ -256,10 +256,15 @@ onUnmounted(() => timer && clearInterval(timer));
 </script>
 
 <style scoped>
-.dash { padding: 4px 2px 24px; }
+.dash {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 16px;
+}
 
 /* 顶栏 */
-.topbar { display: flex; align-items: center; justify-content: flex-end; gap: 14px; margin-bottom: 12px; }
+.topbar { display: flex; align-items: center; justify-content: flex-end; gap: 14px; }
 .clock { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #606266; margin-right: auto; }
 .clock-time { color: #909399; font-style: normal; }
 .pulse { width: 9px; height: 9px; border-radius: 50%; background: #67c23a; box-shadow: 0 0 0 0 rgba(103,194,58,.6); animation: pulse 1.8s infinite; }
@@ -306,8 +311,8 @@ onUnmounted(() => timer && clearInterval(timer));
 .panel { background: #fff; border-radius: 10px; padding: 16px 18px; box-shadow: 0 1px 4px rgba(0,0,0,.06); }
 
 /* 两栏栅格：强制同行面板等宽、等高、底边对齐 */
-.grid-split { display: grid; grid-template-columns: 14fr 10fr; gap: 14px; margin-top: 14px; align-items: stretch; }
-.grid-rank { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 14px; align-items: stretch; }
+.grid-split { display: grid; grid-template-columns: 14fr 10fr; gap: 14px; align-items: stretch; }
+.grid-rank { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; align-items: stretch; }
 .grid-split > .panel, .grid-rank > .panel { height: 100%; margin: 0; min-width: 0; display: flex; flex-direction: column; overflow: hidden; }
 .grid-split .hour-chart, .grid-rank .rank-list { flex: 1; }
 @media (max-width: 992px) {
