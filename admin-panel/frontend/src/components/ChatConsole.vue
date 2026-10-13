@@ -21,8 +21,8 @@
           <div class="conv-info">
             <div class="conv-name">
               {{ c.first_name || c.username || c.user_id }}
-              <el-tag v-if="c.unverified_count > 0" size="small" type="warning" effect="dark"
-                      style="margin-left: 4px">未验证 {{ c.unverified_count }}</el-tag>
+              <el-tag v-if="c.pending_count > 0" size="small" type="warning" effect="dark"
+                      style="margin-left: 4px">待处理 {{ c.pending_count }}</el-tag>
               <el-tag v-if="!fixedBot" size="small" effect="plain" style="margin-left: 4px">{{ c.bot_name }}</el-tag>
             </div>
             <div class="conv-meta">
@@ -241,6 +241,8 @@ async function forwardOne(m) {
     if (r && r.ok) {
       m.forwarded = true;
       ElMessage.success(`已转发给 ${r.forwarded}/${r.targets} 位管理员`);
+      // 重拉会话列表，刷新左侧「待处理」角标（转发即视为已接手）
+      await loadConversations();
     } else {
       ElMessage.error((r && r.error) || '转发失败');
     }

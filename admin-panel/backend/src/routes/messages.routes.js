@@ -84,16 +84,30 @@ router.get('/conversations', requirePerm('message:view'), async (req, res, next)
     }
 
     // 聚合直接来自 message_log，一次查询拿到条数与最近时间（消除旧的 N+1）。
+    // pending_count＝待处理留痕：入站 + 未验证 + 尚未转发给管理员 + 排除 /start 等验证指令。
+    // 手动转发即视为已接手，角标相应减少；逐消息气泡仍各自展示「未验证 / 已转发」。
     const rows = await query(
-      `SELECT b.id AS bot_id, b.bot_name, g.user_id, g.msg_count, g.unverified_count, g.last_at,
+      `SELECT b.id AS bot_id, b.bot_name, g.user_id, g.msg_count, g.pending_count, g.last_at,
               u.username, u.first_name, u.last_name
          FROM (
-           SELECT bot_id, user_id,
+           SELECT x.bot_id, x.user_id,
                   COUNT(*) AS msg_count,
-                  SUM(CASE WHEN is_verified = 0 THEN 1 ELSE 0 END) AS unverified_count,
-                  MAX(created_at) AS last_at
-             FROM message_log
-            GROUP BY bot_id, user_id
+                  SUM(CASE WHEN x.direction='in' AND x.is_verified=0 AND x.fwd=0
+                            AND NOT (x.msg_type='text' AND x.text_content LIKE '/%')
+                           THEN 1 ELSE 0 END) AS pending_count,
+                  MAX(x.created_at) AS last_at
+             FROM (
+               SELECT ml.bot_id, ml.user_id, ml.direction, ml.is_verified, ml.msg_type,
+                      ml.text_content, ml.created_at,
+                      CASE WHEN EXISTS (
+                        SELECT 1 FROM forward_map fm
+                         WHERE fm.bot_name = ml.bot_name COLLATE utf8mb4_unicode_ci
+                           AND fm.user_id  = ml.user_id
+                           AND fm.original_msg_id = ml.message_id)
+                           THEN 1 ELSE 0 END AS fwd
+                 FROM message_log ml
+             ) x
+            GROUP BY x.bot_id, x.user_id
          ) g
          JOIN bots b ON b.id = g.bot_id
          LEFT JOIN user u ON u.id = g.user_id
@@ -104,7 +118,7 @@ router.get('/conversations', requirePerm('message:view'), async (req, res, next)
 
     for (const c of rows) {
       c.avatar_url = `/server/api/avatar/${c.user_id}?bot_id=${c.bot_id}`;
-      c.unverified_count = Number(c.unverified_count) || 0;
+      c.pending_count = Number(c.pending_count) || 0;
     }
     res.json(rows);
   } catch (e) { next(e); }
