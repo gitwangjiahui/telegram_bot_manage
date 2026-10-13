@@ -58,10 +58,9 @@
     </div>
 
     <!-- 图表区 -->
-    <el-row :gutter="12" style="margin-top:14px">
+    <div class="grid-split">
       <!-- 今日分时 -->
-      <el-col :xs="24" :lg="14">
-        <div class="panel">
+      <div class="panel">
           <div class="panel-title">今日 24 小时实时收发
             <span class="legend"><i class="sw in" />上行<i class="sw out" />回复</span>
           </div>
@@ -78,11 +77,9 @@
             </div>
           </div>
         </div>
-      </el-col>
 
       <!-- 消息类型 + 回复覆盖 -->
-      <el-col :xs="24" :lg="10">
-        <div class="panel h-full">
+      <div class="panel">
           <div class="panel-title">入站消息类型分布</div>
           <div class="type-list">
             <div v-for="t in typeRows" :key="t.type" class="type-row">
@@ -106,8 +103,7 @@
             </div>
           </div>
         </div>
-      </el-col>
-    </el-row>
+    </div>
 
     <!-- 30 天趋势 -->
     <div class="panel" style="margin-top:14px">
@@ -128,9 +124,8 @@
     </div>
 
     <!-- 排行 -->
-    <el-row :gutter="12" style="margin-top:14px">
-      <el-col :xs="24" :md="12">
-        <div class="panel">
+    <div class="grid-rank">
+      <div class="panel">
           <div class="panel-title">管理员回复量 Top</div>
           <div class="rank-list">
             <div v-for="(a, i) in m.top_admins" :key="a.name" class="rank-row">
@@ -142,9 +137,7 @@
             <div v-if="!m.top_admins?.length" class="empty">暂无回复</div>
           </div>
         </div>
-      </el-col>
-      <el-col :xs="24" :md="12">
-        <div class="panel">
+      <div class="panel">
           <div class="panel-title">活跃客户 Top（近30天入站）</div>
           <div class="rank-list">
             <div v-for="(u, i) in m.top_users" :key="u.user_id" class="rank-row">
@@ -156,8 +149,7 @@
             <div v-if="!m.top_users?.length" class="empty">暂无客户</div>
           </div>
         </div>
-      </el-col>
-    </el-row>
+    </div>
   </div>
 </template>
 
@@ -312,7 +304,15 @@ onUnmounted(() => timer && clearInterval(timer));
 
 /* 面板 */
 .panel { background: #fff; border-radius: 10px; padding: 16px 18px; box-shadow: 0 1px 4px rgba(0,0,0,.06); }
-.panel.h-full { height: 100%; }
+
+/* 两栏栅格：强制同行面板等宽、等高、底边对齐 */
+.grid-split { display: grid; grid-template-columns: 14fr 10fr; gap: 14px; margin-top: 14px; align-items: stretch; }
+.grid-rank { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 14px; align-items: stretch; }
+.grid-split > .panel, .grid-rank > .panel { height: 100%; margin: 0; min-width: 0; display: flex; flex-direction: column; }
+.grid-split .hour-chart, .grid-rank .rank-list { flex: 1; }
+@media (max-width: 992px) {
+  .grid-split, .grid-rank { grid-template-columns: 1fr; }
+}
 .panel-title { font-size: 15px; font-weight: 600; color: #303133; margin-bottom: 14px; display: flex; align-items: center; }
 .legend { font-size: 12px; font-weight: 400; color: #909399; margin-left: auto; display: flex; align-items: center; gap: 6px; }
 .sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin: 0 2px 0 8px; }
