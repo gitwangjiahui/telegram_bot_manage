@@ -86,7 +86,9 @@ router.get('/conversations', requirePerm('message:view'), async (req, res, next)
     // 聚合直接来自 message_log，一次查询拿到条数与最近时间（消除旧的 N+1）。
     // 两个独立信号：
     //   is_verified_user —— 用户级：该 (bot,user) 是否在 user_verification 有验证记录（验证后不再显示未验证）。
-    //   unforwarded_count —— 消息级：未验证留痕入站中尚未转发给管理员的条数（与气泡里可点「转发」一致，含未转的 /start），手动转发后减少；已验证用户的消息系统自动转发，不计入。
+    //   unforwarded_count —— 消息级：未验证留痕入站中尚未转发给管理员的条数（与气泡里可点「转发」一致），
+    //     手动转发后减少；已验证用户的消息系统自动转发，不计入。
+    //     /start（含 /start@bot）是客户端打开会话时自动发的系统命令，不是需人工跟进的内容，不计入；非文本媒体仍计入。
     const rows = await query(
       `SELECT b.id AS bot_id, b.bot_name, g.user_id, g.msg_count,
               g.unforwarded_count, g.last_at,
@@ -98,10 +100,14 @@ router.get('/conversations', requirePerm('message:view'), async (req, res, next)
            SELECT x.bot_id, x.user_id,
                   COUNT(*) AS msg_count,
                   SUM(CASE WHEN x.direction='in' AND x.is_verified=0 AND x.fwd=0
+                            AND (x.msg_type <> 'text'
+                                 OR x.text_content IS NULL
+                                 OR x.text_content NOT REGEXP '^/start(@[A-Za-z0-9_]+)?([[:space:]]|$)')
                            THEN 1 ELSE 0 END) AS unforwarded_count,
                   MAX(x.created_at) AS last_at
              FROM (
-               SELECT ml.bot_id, ml.user_id, ml.direction, ml.is_verified, ml.created_at,
+               SELECT ml.bot_id, ml.user_id, ml.direction, ml.is_verified, ml.msg_type, ml.created_at,
+                      ml.text_content,
                       CASE WHEN EXISTS (
                         SELECT 1 FROM forward_map fm
                          WHERE fm.bot_name = ml.bot_name COLLATE utf8mb4_unicode_ci
