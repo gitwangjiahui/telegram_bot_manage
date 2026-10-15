@@ -99,6 +99,28 @@ export async function metricsPayload(ctx) {
     FROM bots b LEFT JOIN bot_heartbeat hb ON hb.bot_name = b.bot_name
     WHERE ${scope.where}`;
 
+  const liveSQL = `
+    SELECT b.id AS bot_id, b.bot_name, b.bot_username, b.is_active,
+           CASE WHEN ${FRESH} THEN 1 ELSE 0 END AS is_running,
+           hb.pid, hb.started_at, hb.heartbeat_at, hb.last_update_id,
+           hb.today_in AS hb_in, hb.today_out AS hb_out, hb.captcha_available,
+           hb.last_error, hb.last_error_at,
+           TIMESTAMPDIFF(SECOND, hb.heartbeat_at, NOW()) AS age_seconds,
+           COALESCE(lg.log_in, 0)         AS log_in,
+           COALESCE(lg.log_out, 0)        AS log_out,
+           COALESCE(lg.log_unverified, 0) AS log_unverified
+    FROM bots b
+    LEFT JOIN bot_heartbeat hb ON hb.bot_name = b.bot_name
+    LEFT JOIN (
+      SELECT bot_id,
+             SUM(direction='in')  AS log_in,
+             SUM(direction='out') AS log_out,
+             SUM(is_verified=0)   AS log_unverified
+      FROM message_log WHERE created_at >= CURDATE() GROUP BY bot_id
+    ) lg ON lg.bot_id = b.id
+    WHERE ${scope.where}
+    ORDER BY b.id`;
+
   const hourlySQL = `
     SELECT HOUR(g.created_at) AS hr,
            SUM(g.direction='in')  AS inbound,
