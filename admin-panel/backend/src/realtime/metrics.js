@@ -15,6 +15,7 @@ export async function livePayload(ctx) {
            hb.today_in AS hb_in, hb.today_out AS hb_out, hb.captcha_available,
            hb.last_error, hb.last_error_at,
            TIMESTAMPDIFF(SECOND, hb.heartbeat_at, NOW()) AS age_seconds,
+           TIMESTAMPDIFF(SECOND, hb.last_error_at, NOW()) AS err_age_s,
            COALESCE(lg.log_in, 0)         AS log_in,
            COALESCE(lg.log_out, 0)        AS log_out,
            COALESCE(lg.log_unverified, 0) AS log_unverified
@@ -40,7 +41,9 @@ export async function livePayload(ctx) {
     hb_in: r.hb_in, hb_out: r.hb_out,
     captcha: r.captcha_available,
     captcha_low: !(r.captcha_available > 20),
-    last_error: r.last_error, last_error_at: r.last_error_at,
+    // 仅把 5 分钟内的错误视为“当前错误”，避免恢复后旧错误长期挂红框
+    last_error: (r.err_age_s != null && r.err_age_s <= 300) ? r.last_error : null,
+    last_error_at: (r.err_age_s != null && r.err_age_s <= 300) ? r.last_error_at : null,
   }));
 }
 
@@ -106,6 +109,7 @@ export async function metricsPayload(ctx) {
            hb.today_in AS hb_in, hb.today_out AS hb_out, hb.captcha_available,
            hb.last_error, hb.last_error_at,
            TIMESTAMPDIFF(SECOND, hb.heartbeat_at, NOW()) AS age_seconds,
+           TIMESTAMPDIFF(SECOND, hb.last_error_at, NOW()) AS err_age_s,
            COALESCE(lg.log_in, 0)         AS log_in,
            COALESCE(lg.log_out, 0)        AS log_out,
            COALESCE(lg.log_unverified, 0) AS log_unverified
@@ -259,7 +263,9 @@ export async function metricsPayload(ctx) {
       hb_in: r.hb_in, hb_out: r.hb_out,
       captcha: r.captcha_available,
       captcha_low: !(r.captcha_available > 20),
-      last_error: r.last_error, last_error_at: r.last_error_at,
+      // 仅把 5 分钟内的错误视为“当前错误”，避免恢复后旧错误长期挂红框
+      last_error: (r.err_age_s != null && r.err_age_s <= 300) ? r.last_error : null,
+      last_error_at: (r.err_age_s != null && r.err_age_s <= 300) ? r.last_error_at : null,
     })),
     hourly,
     trend,
