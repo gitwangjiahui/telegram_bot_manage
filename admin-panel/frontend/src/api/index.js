@@ -11,7 +11,14 @@ api.interceptors.request.use((cfg) => {
 });
 
 api.interceptors.response.use(
-  (res) => res.data,
+  (res) => {
+    // 滑动续期：后端在临近过期时通过响应头下发新 token，无感替换。
+    const fresh = res.headers?.['x-refreshed-token'];
+    if (fresh && fresh !== localStorage.getItem('token')) {
+      localStorage.setItem('token', fresh);
+    }
+    return res.data;
+  },
   (err) => {
     if (err.response?.status === 401) {
       localStorage.removeItem('token');

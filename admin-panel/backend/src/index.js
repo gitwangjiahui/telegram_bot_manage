@@ -14,7 +14,7 @@ import { mediaProxy, avatarProxy } from './media.js';
 
 const app = express();
 
-app.use(cors());
+app.use(cors({ exposedHeaders: ['X-Refreshed-Token'] }));
 app.use(express.json({ limit: '2mb' }));
 
 // 所有业务 API 统一前缀（生产 /server/api，本地开发可用 /api）

@@ -2,6 +2,9 @@ import jwt from 'jsonwebtoken';
 import { config } from './config.js';
 import { query, one } from './db.js';
 
+// 滑动续期：token 剩余有效期低于该窗口时，随响应头下发新 token，活跃用户无需重登。
+const REFRESH_WINDOW_SEC = 24 * 60 * 60; // 剩余不足 1 天即续期
+
 // 加载用户角色、权限、Bot 范围
 async function loadUserContext(userId) {
   const roles = await query(
@@ -52,6 +55,17 @@ export async function authRequired(req, res, next) {
 
     req.user = user;
     req.ctx = ctx;
+
+    // 滑动续期：剩余有效期不足窗口时，下发一枚全新 7 天 token，前端拦截器无感替换。
+    const nowSec = Math.floor(Date.now() / 1000);
+    const remain = (payload.exp ?? 0) - nowSec;
+    if (remain > 0 && remain < REFRESH_WINDOW_SEC) {
+      const fresh = jwt.sign({ sub: user.id, username: user.username }, config.jwtSecret, {
+        expiresIn: config.jwtExpires,
+      });
+      res.setHeader('X-Refreshed-Token', fresh);
+    }
+
     next();
   } catch (e) {
     return res.status(401).json({ message: '登录已过期' });
