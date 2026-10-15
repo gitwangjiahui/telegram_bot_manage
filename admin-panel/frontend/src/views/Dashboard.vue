@@ -7,13 +7,17 @@
         {{ allRunning ? '全部 Bot 运行中' : `${m.totals?.running ?? 0}/${m.totals?.bots ?? 0} 运行中` }}
         <i class="clock-time">{{ serverTime }}</i>
       </div>
-      <el-switch v-model="autoRefresh" active-text="自动刷新 10s" inline-prompt size="small" />
+      <el-switch v-model="autoRefresh" active-text="实时推送" inactive-text="已暂停" inline-prompt size="small" />
+      <el-tag size="small" :type="wsConnected ? 'success' : 'info'" effect="plain" disable-transitions>
+        {{ wsConnected ? 'WS 已连接' : 'WS 连接中' }}
+      </el-tag>
       <el-button :icon="Refresh" size="small" circle @click="load" />
     </div>
 
     <!-- 核心 KPI -->
     <div class="kpi-grid">
-      <div v-for="c in kpiCards" :key="c.key" class="kpi-card">
+      <div v-for="c in kpiCards" :key="c.key" class="kpi-card"
+           :class="{ clickable: !!c.to }" @click="go(c)">
         <div class="kpi-top">
           <span class="kpi-label">{{ c.label }}</span>
           <span class="kpi-badge" :style="{ background: c.badgeBg, color: c.badgeFg }">
@@ -32,7 +36,8 @@
     <div class="panel">
       <div class="panel-title">Bot 实时运行</div>
       <div class="bot-grid">
-        <div v-for="b in m.live" :key="b.bot_id" class="bot-card" :class="{ down: !b.is_running }">
+        <div v-for="b in m.live" :key="b.bot_id" class="bot-card clickable"
+             :class="{ down: !b.is_running }" @click="router.push(`/bots/${b.bot_id}`)">
           <div class="bot-head">
             <span class="bot-name">{{ b.bot_name }}</span>
             <el-tag :type="b.is_running ? 'success' : 'danger'" size="small" effect="dark">
@@ -155,16 +160,20 @@
 
 <script setup>
 import { computed, onMounted, onUnmounted, reactive, ref } from 'vue';
+import { useRouter } from 'vue-router';
 import {
   Refresh, Monitor, User, ChatDotRound, Promotion, CircleCheck, Warning, Finished, Select,
 } from '@element-plus/icons-vue';
 import api from '../api';
+import { onDash } from '../ws-dashboard';
 
+const router = useRouter();
 const m = reactive({});
 const loading = ref(false);
 const autoRefresh = ref(true);
+const wsConnected = ref(false);
 const serverTime = ref('');
-let timer = null;
+let unsubs = [];
 
 const allRunning = computed(() => (m.totals?.bots ?? 0) > 0 && (m.totals?.running ?? 0) === m.totals?.bots);
 const curHour = new Date().getHours();
@@ -183,10 +192,10 @@ const kpiCards = computed(() => {
   const rateColor = rate >= 60 ? '#3fae63' : rate >= 40 ? '#d98e2b' : '#e05b5b';
 
   return [
-    { key: 'bots', icon: Monitor, label: '运行 Bot', val: `${t.running ?? 0}/${t.bots ?? 0}`,
+    { key: 'bots', icon: Monitor, label: '运行 Bot', val: `${t.running ?? 0}/${t.bots ?? 0}`, to: '/bots',
       ...((t.running ?? 0) < (t.bots ?? 1) ? RED : NEUTRAL),
       valueColor: (t.running ?? 0) < (t.bots ?? 1) ? '#e05b5b' : undefined },
-    { key: 'users', icon: User, label: '已验证客户', val: t.verified_users ?? 0, ...NEUTRAL,
+    { key: 'users', icon: User, label: '已验证客户', val: t.verified_users ?? 0, ...NEUTRAL, to: '/users',
       sub: td.new_users ? `今日新增 ${td.new_users}` : '' },
     { key: 'in', icon: ChatDotRound, label: '今日上行', val: td.inbound ?? 0, ...NEUTRAL,
       sub: deltaIn != null ? `${deltaIn >= 0 ? '▲' : '▼'} ${Math.abs(deltaIn)}% 较昨日` : (td.yday_in ? '' : '昨日 0'),
@@ -245,23 +254,63 @@ function dH(v) {
   return Math.max(2, Math.round((v / max) * 130)) + 'px';
 }
 
+// 全量数据：首屏 HTTP 与 WS dash_metrics 帧共用。直接整体替换各分区，
+// Vue 按 key 做局部 DOM patch，不发生整页刷新/闪烁。
+function applyMetrics(data) {
+  if (!autoRefresh.value) return;
+  if (data.totals) m.totals = data.totals;
+  if (data.today) m.today = data.today;
+  if (data.conversation) m.conversation = data.conversation;
+  if (data.live) m.live = data.live;
+  if (data.hourly) m.hourly = data.hourly;
+  if (data.trend) m.trend = data.trend;
+  if (data.by_type) m.by_type = data.by_type;
+  if (data.by_bot) m.by_bot = data.by_bot;
+  if (data.top_admins) m.top_admins = data.top_admins;
+  if (data.top_users) m.top_users = data.top_users;
+  if (data.server_time) {
+    serverTime.value = new Date(data.server_time).toLocaleTimeString('zh-CN', { hour12: false });
+  }
+}
+
+// 轻量帧：只更新顶部运行态与实时 Bot 卡片（3s），不触碰任何图表/KPI 数字。
+function applyLive(data) {
+  if (!autoRefresh.value) return;
+  if (Array.isArray(data.live)) {
+    m.live = data.live;
+    if (m.totals) {
+      m.totals.running = data.running;
+      m.totals.stopped = data.bots - data.running;
+    }
+  }
+  if (data.server_time) {
+    serverTime.value = new Date(data.server_time).toLocaleTimeString('zh-CN', { hour12: false });
+  }
+}
+
 async function load() {
   loading.value = true;
   try {
-    const data = await api.get('/dashboard/metrics');
-    Object.keys(m).forEach((k) => delete m[k]);
-    Object.assign(m, data);
-    serverTime.value = new Date(data.server_time).toLocaleTimeString('zh-CN', { hour12: false });
+    applyMetrics(await api.get('/dashboard/metrics'));
   } finally {
     loading.value = false;
   }
 }
 
+function go(card) {
+  if (card.to) router.push(card.to);
+}
+
 onMounted(() => {
   load();
-  timer = setInterval(() => autoRefresh.value && load(), 10000);
+  // 所有自动刷新走 WebSocket；服务端按频道推不同分区，本端按帧局部更新。
+  unsubs = [
+    onDash('dash_metrics', applyMetrics),
+    onDash('dash_live', applyLive),
+    onDash('dash_status', (d) => { wsConnected.value = !!d.connected; }),
+  ];
 });
-onUnmounted(() => timer && clearInterval(timer));
+onUnmounted(() => unsubs.forEach((u) => u && u()));
 </script>
 
 <style scoped>
@@ -303,6 +352,8 @@ onUnmounted(() => timer && clearInterval(timer));
   overflow: hidden;
 }
 .kpi-card:hover { transform: translateY(-2px); box-shadow: 0 8px 22px rgba(31,45,61,.12); }
+.kpi-card.clickable { cursor: pointer; }
+.clickable { cursor: pointer; }
 .kpi-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .kpi-label { font-size: 13px; color: #8a94a6; white-space: nowrap; letter-spacing: .2px; }
 .kpi-badge {

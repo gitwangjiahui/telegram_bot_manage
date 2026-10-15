@@ -6,7 +6,7 @@ import { query, one } from './db.js';
 const REFRESH_WINDOW_SEC = 24 * 60 * 60; // 剩余不足 1 天即续期
 
 // 加载用户角色、权限、Bot 范围
-async function loadUserContext(userId) {
+export async function loadUserContext(userId) {
   const roles = await query(
     `SELECT r.id, r.role_code, r.role_name
        FROM admin_user_roles ur JOIN admin_roles r ON r.id = ur.role_id

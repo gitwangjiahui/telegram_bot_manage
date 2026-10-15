@@ -1,7 +1,9 @@
 import express from 'express';
+import http from 'http';
 import cors from 'cors';
 import { config } from './config.js';
 import { authRequired } from './auth.js';
+import { attachDashboardWss } from './realtime/ws.js';
 import authRoutes from './routes/auth.routes.js';
 import dashboardRoutes from './routes/dashboard.routes.js';
 import botsRoutes from './routes/bots.routes.js';
@@ -56,6 +58,8 @@ app.use((err, req, res, next) => {
   res.status(500).json({ message: '服务器内部错误' });
 });
 
-app.listen(config.port, () => {
+const server = http.createServer(app);
+attachDashboardWss(server);
+server.listen(config.port, () => {
   console.log(`Admin API listening on :${config.port} (base ${BASE})`);
 });

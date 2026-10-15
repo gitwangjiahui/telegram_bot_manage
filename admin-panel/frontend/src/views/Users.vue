@@ -101,10 +101,12 @@
 
 <script setup>
 import { onMounted, reactive, ref } from 'vue';
+import { useRoute } from 'vue-router';
 import { ElMessage } from 'element-plus';
 import api from '../api';
 import { useAuthStore } from '../stores/auth';
 
+const route = useRoute();
 const auth = useAuthStore();
 const bots = ref([]);
 const list = ref([]);
@@ -152,6 +154,9 @@ async function removeAdmin(row) {
 
 onMounted(async () => {
   bots.value = await api.get('/bots');
+  // 支持从首页/其它页带 ?bot_id= 进入并自动预筛该 Bot 的客户
+  const qid = Number(route.query.bot_id);
+  if (qid && bots.value.some((b) => b.id === qid)) query.bot_id = qid;
   await load();
 });
 </script>

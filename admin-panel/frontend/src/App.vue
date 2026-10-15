@@ -5,6 +5,7 @@
 <script setup>
 import { onMounted, onBeforeUnmount } from 'vue';
 import { startWs, stopWs } from './ws';
+import { startDashWs, stopDashWs } from './ws-dashboard';
 import { useAuthStore } from './stores/auth';
 
 const auth = useAuthStore();
@@ -39,11 +40,13 @@ onMounted(() => {
   if (auth.token) {
     if (!auth.me) auth.fetchMe().catch(() => {});
     startWs();
+    startDashWs();
     startKeepAlive();
   }
 });
 onBeforeUnmount(() => {
   stopWs();
+  stopDashWs();
   if (keepAliveTimer) { clearInterval(keepAliveTimer); keepAliveTimer = null; }
 });
 </script>
